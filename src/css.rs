@@ -140,7 +140,7 @@ fn apply(style: &mut Style, css: &HashMap<String, String>) {
             "padding" => set(parse_edges(value), |e| style.padding = e, key, value),
             "margin" => set(parse_edges(value), |e| style.margin = e, key, value),
             "text-align" => set(parse_text_align(value), |a| style.text_align = a, key, value),
-            other => eprintln!("vEnter: unknown css property '{other}' (ignored)"),
+            other => eprintln!("Winbar: unknown css property '{other}' (ignored)"),
         }
     }
 }
@@ -149,7 +149,7 @@ fn apply(style: &mut Style, css: &HashMap<String, String>) {
 fn set<T>(parsed: Option<T>, mut assign: impl FnMut(T), key: &str, value: &str) {
     match parsed {
         Some(v) => assign(v),
-        None => eprintln!("vEnter: invalid value '{value}' for css '{key}' (ignored)"),
+        None => eprintln!("Winbar: invalid value '{value}' for css '{key}' (ignored)"),
     }
 }
 

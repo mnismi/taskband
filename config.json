@@ -1,5 +1,5 @@
 {
-    "modules-right": ["cpu", "clock"],
+    "modules": ["cpu", "clock"],
 
     "css": {
         "font-family": "Segoe UI",

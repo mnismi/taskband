@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct RawConfig {
-    #[serde(rename = "modules-right", default)]
-    pub modules_right: Vec<String>,
+    #[serde(rename = "modules", default)]
+    pub module_order: Vec<String>,
     #[serde(default)]
     pub css: HashMap<String, String>,
     /// Pixels reserved at the right edge of each secondary taskbar for the
@@ -23,8 +23,8 @@ pub struct RawConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct MonitorConfig {
-    #[serde(rename = "modules-right", default)]
-    pub modules_right: Vec<String>,
+    #[serde(rename = "modules", default)]
+    pub module_order: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -40,6 +40,10 @@ fn default_interval() -> u64 {
     5
 }
 
+/// The default config, baked into the binary so a lone `.exe` runs with no
+/// `config.json` beside it. The tray's "Edit config" writes this out on demand.
+pub const DEFAULT_CONFIG: &str = include_str!("../config.json");
+
 /// Default pixels reserved for the secondary taskbar clock. Measured at ~81px
 /// for the two-line time/date at 100% scaling; 100 leaves headroom.
 fn default_clock_reserve() -> i32 {
@@ -51,11 +55,14 @@ pub fn parse(text: &str) -> Result<RawConfig, String> {
     json5::from_str(text).map_err(|e| e.to_string())
 }
 
-/// Read and parse the config file at `path`.
+/// Read and parse the config file at `path`. If the file is missing, the
+/// built-in [`DEFAULT_CONFIG`] is used instead. A file that exists but fails to
+/// parse returns an error (the caller decides whether to fall back).
 pub fn load(path: &Path) -> Result<RawConfig, String> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| format!("reading {}: {e}", path.display()))?;
-    parse(&text).map_err(|e| format!("parsing {}: {e}", path.display()))
+    match std::fs::read_to_string(path) {
+        Ok(text) => parse(&text).map_err(|e| format!("parsing {}: {e}", path.display())),
+        Err(_) => parse(DEFAULT_CONFIG).map_err(|e| format!("parsing built-in config: {e}")),
+    }
 }
 
 /// A resolved registry: per-slot styles/specs (each referenced module once),
@@ -97,15 +104,15 @@ fn resolve_list(
                 slot_of.insert(name.clone(), slot);
                 slots.push(slot);
             }
-            None => eprintln!("vEnter: module '{name}' is not defined (skipped)"),
+            None => eprintln!("Winbar: module '{name}' is not defined (skipped)"),
         }
     }
     slots
 }
 
 /// Build the shared registry plus per-monitor slot lists. When `monitors` is
-/// present it wins (and top-level `modules-right` is ignored with a warning);
-/// otherwise `legacy` holds the top-level `modules-right` slots for the primary.
+/// present it wins (and the top-level `modules` list is ignored with a warning);
+/// otherwise `legacy` holds the top-level `modules` slots for the primary.
 pub fn build_registry(cfg: &RawConfig) -> BuildResult {
     let mut styles = Vec::new();
     let mut specs = Vec::new();
@@ -117,22 +124,22 @@ pub fn build_registry(cfg: &RawConfig) -> BuildResult {
     for (key, mc) in &cfg.monitors {
         match key.parse::<usize>() {
             Ok(index) => entries.push((index, mc)),
-            Err(_) => eprintln!("vEnter: monitor key '{key}' is not a valid index (skipped)"),
+            Err(_) => eprintln!("Winbar: monitor key '{key}' is not a valid index (skipped)"),
         }
     }
     entries.sort_by_key(|(index, _)| *index);
 
     let mut monitors = HashMap::new();
     for (index, mc) in entries {
-        let slots = resolve_list(&mc.modules_right, cfg, &mut styles, &mut specs, &mut slot_of);
+        let slots = resolve_list(&mc.module_order, cfg, &mut styles, &mut specs, &mut slot_of);
         monitors.insert(index, slots);
     }
 
     let legacy = if cfg.monitors.is_empty() {
-        resolve_list(&cfg.modules_right, cfg, &mut styles, &mut specs, &mut slot_of)
+        resolve_list(&cfg.module_order, cfg, &mut styles, &mut specs, &mut slot_of)
     } else {
-        if !cfg.modules_right.is_empty() {
-            eprintln!("vEnter: 'monitors' is set; top-level 'modules-right' is ignored");
+        if !cfg.module_order.is_empty() {
+            eprintln!("Winbar: 'monitors' is set; top-level 'modules' is ignored");
         }
         Vec::new()
     };
@@ -157,18 +164,25 @@ pub fn slots_for_monitor(
     }
 }
 
-/// Resolve the config path: `venter.json` next to the executable, else `venter.json`
-/// in the current working directory.
+/// Resolve the config path: an existing `config.json` next to the executable
+/// wins, then one in the current working directory. If neither exists the
+/// canonical location — next to the executable — is returned anyway, so the
+/// tray's "Edit config" creates it there and the watcher reloads it live.
 pub fn config_path() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("venter.json");
-            if candidate.exists() {
-                return candidate;
-            }
+    let beside_exe = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("config.json")));
+
+    if let Some(candidate) = &beside_exe {
+        if candidate.exists() {
+            return candidate.clone();
         }
     }
-    PathBuf::from("venter.json")
+    let cwd = PathBuf::from("config.json");
+    if cwd.exists() {
+        return cwd;
+    }
+    beside_exe.unwrap_or(cwd)
 }
 
 #[cfg(test)]
@@ -180,7 +194,7 @@ mod tests {
         let cfg = parse(
             r##"{
                 // order, left-to-right
-                "modules-right": ["cpu", "clock"],
+                "modules": ["cpu", "clock"],
                 "css": { "color": "#ffffff" },
                 "cpu": { "exec": "echo hi", "interval": 2, "css": { "font-weight": "bold" } },
                 "clock": { "exec": "echo now" }
@@ -188,7 +202,7 @@ mod tests {
         )
         .expect("valid config");
 
-        assert_eq!(cfg.modules_right, vec!["cpu".to_string(), "clock".to_string()]);
+        assert_eq!(cfg.module_order, vec!["cpu".to_string(), "clock".to_string()]);
         assert_eq!(cfg.css.get("color").map(String::as_str), Some("#ffffff"));
 
         let cpu = cfg.modules.get("cpu").expect("cpu module");
@@ -210,8 +224,8 @@ mod tests {
         let cfg = parse(
             r##"{
                 "monitors": {
-                    "0": { "modules-right": ["cpu"] },
-                    "1": { "modules-right": ["clock", "net"] }
+                    "0": { "modules": ["cpu"] },
+                    "1": { "modules": ["clock", "net"] }
                 },
                 "cpu":   { "exec": "echo c" },
                 "clock": { "exec": "echo t" },
@@ -220,9 +234,9 @@ mod tests {
         )
         .expect("valid config");
 
-        assert_eq!(cfg.monitors.get("0").unwrap().modules_right, vec!["cpu".to_string()]);
+        assert_eq!(cfg.monitors.get("0").unwrap().module_order, vec!["cpu".to_string()]);
         assert_eq!(
-            cfg.monitors.get("1").unwrap().modules_right,
+            cfg.monitors.get("1").unwrap().module_order,
             vec!["clock".to_string(), "net".to_string()]
         );
         // module definitions still flatten correctly alongside the `monitors` field
@@ -234,8 +248,8 @@ mod tests {
         let cfg = parse(
             r##"{
                 "monitors": {
-                    "0": { "modules-right": ["cpu", "clock"] },
-                    "1": { "modules-right": ["clock", "cpu"] }
+                    "0": { "modules": ["cpu", "clock"] },
+                    "1": { "modules": ["clock", "cpu"] }
                 },
                 "cpu":   { "exec": "echo c" },
                 "clock": { "exec": "echo t" }
@@ -257,7 +271,7 @@ mod tests {
     fn build_registry_legacy_fallback_when_no_monitors_key() {
         let cfg = parse(
             r##"{
-                "modules-right": ["cpu", "clock", "cpu"],
+                "modules": ["cpu", "clock", "cpu"],
                 "cpu":   { "exec": "echo c" },
                 "clock": { "exec": "echo t" }
             }"##,
@@ -275,7 +289,7 @@ mod tests {
     fn build_registry_skips_undefined_modules() {
         let cfg = parse(
             r##"{
-                "monitors": { "0": { "modules-right": ["cpu", "ghost"] } },
+                "monitors": { "0": { "modules": ["cpu", "ghost"] } },
                 "cpu": { "exec": "echo c" }
             }"##,
         )

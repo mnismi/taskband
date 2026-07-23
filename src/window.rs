@@ -17,8 +17,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, GetWindowRect, IsWindowVisible, KillTimer, LoadCursorW, PostQuitMessage,
     RegisterClassW, SetLayeredWindowAttributes, SetParent, SetTimer, SetWindowLongPtrW,
     SetWindowPos, TranslateMessage, GWLP_USERDATA, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, HWND_TOP,
-    IDC_ARROW, LWA_COLORKEY, MSG, SWP_SHOWWINDOW, WINDOW_STYLE, WM_DESTROY, WM_PAINT, WM_TIMER,
-    WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_POPUP, WS_VISIBLE,
+    IDC_ARROW, LWA_COLORKEY, MSG, SWP_SHOWWINDOW, WINDOW_STYLE, WM_APP, WM_DESTROY, WM_PAINT,
+    WM_TIMER, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_POPUP, WS_VISIBLE,
 };
 
 use crate::css::{Style, TextAlign};
@@ -27,6 +27,11 @@ use crate::plugin::Update;
 const TIMER_ID: usize = 1;
 const TIMER_MS: u32 = 250;
 const GAP: i32 = 8;
+
+/// Posted to the driver window by the tray's "Reload config" item. Clearing the
+/// tracked mtime makes the next timer tick treat the config as changed and reload
+/// it (re-running every module immediately).
+pub const WM_APP_RELOAD: u32 = WM_APP + 1;
 
 /// One monitor's bar: its layered child window on that monitor's taskbar plus the
 /// layout of the module slots it shows. Slots index into `App::texts`/`styles`.
@@ -116,7 +121,7 @@ unsafe fn maybe_reload(app: &mut App) -> bool {
     let cfg = match crate::config::load(&app.path) {
         Ok(cfg) => cfg,
         Err(e) => {
-            eprintln!("vEnter: reload skipped — {e}");
+            eprintln!("Winbar: reload skipped — {e}");
             return false;
         }
     };
@@ -139,7 +144,7 @@ unsafe fn maybe_reload(app: &mut App) -> bool {
         bar.total_width = 0;
         bar.clock_reserve = if bar.primary { 0 } else { build.clock_reserve };
     }
-    println!("vEnter: reloaded config — {n} module slot(s).");
+    println!("Winbar: reloaded config — {n} module slot(s).");
     true
 }
 
@@ -214,7 +219,7 @@ pub fn register_class() -> Result<HINSTANCE> {
         let wc = WNDCLASSW {
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
-            lpszClassName: w!("vEnterTaskbarWindow"),
+            lpszClassName: w!("WinbarTaskbarWindow"),
             hbrBackground: CreateSolidBrush(COLORREF(0x0000_0000)), // black = transparent key
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             ..Default::default()
@@ -229,8 +234,8 @@ pub fn create_bar_window(instance: HINSTANCE) -> Result<HWND> {
     unsafe {
         let hwnd = CreateWindowExW(
             WS_EX_LAYERED,
-            w!("vEnterTaskbarWindow"),
-            w!("vEnter"),
+            w!("WinbarTaskbarWindow"),
+            w!("Winbar"),
             WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS,
             100,
             100,
@@ -430,6 +435,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             let _ = InvalidateRect(bar.hwnd, None, TRUE);
                         }
                     }
+                }
+                LRESULT(0)
+            }
+            WM_APP_RELOAD => {
+                let app_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut App;
+                if !app_ptr.is_null() {
+                    // Force the next timer tick to see a change and reload.
+                    (*app_ptr).mtime = None;
                 }
                 LRESULT(0)
             }

@@ -1,22 +1,26 @@
+// Release builds run without a console window (background taskbar widget);
+// debug builds keep the console so startup diagnostics are visible.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod config;
 mod css;
 mod layout;
 mod plugin;
 mod taskbar;
+mod tray;
 mod window;
 
 fn main() -> windows::core::Result<()> {
     let path = config::config_path();
-    let cfg = match config::load(&path) {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            eprintln!("vEnter: {e}");
-            std::process::exit(1);
-        }
-    };
+    // A missing config falls back to the built-in default inside `load`; a config
+    // that exists but fails to parse also falls back, so the app always starts.
+    let cfg = config::load(&path).unwrap_or_else(|e| {
+        eprintln!("Winbar: {e}; using built-in default config");
+        config::parse(config::DEFAULT_CONFIG).expect("built-in config must parse")
+    });
 
     let monitors = taskbar::detect();
-    println!("vEnter monitors:");
+    println!("Winbar monitors:");
     for m in &monitors {
         println!("{}", taskbar::monitor_log_line(m));
     }
@@ -28,9 +32,9 @@ fn main() -> windows::core::Result<()> {
     for &idx in build.monitors.keys() {
         match monitors.iter().find(|m| m.index == idx) {
             Some(m) if m.taskbar.is_none() => eprintln!(
-                "vEnter: monitor {idx} has no taskbar — enable 'Show my taskbar on all displays'."
+                "Winbar: monitor {idx} has no taskbar — enable 'Show my taskbar on all displays'."
             ),
-            None => eprintln!("vEnter: monitor {idx} does not exist (skipped)."),
+            None => eprintln!("Winbar: monitor {idx} does not exist (skipped)."),
             _ => {}
         }
     }
@@ -54,16 +58,17 @@ fn main() -> windows::core::Result<()> {
     }
 
     if bars.is_empty() {
-        eprintln!("vEnter: no taskbars found; nothing to display.");
+        eprintln!("Winbar: no taskbars found; nothing to display.");
         std::process::exit(1);
     }
     let driver = driver.unwrap_or_else(|| bars[0].hwnd());
     let bar_count = bars.len();
 
-    let app = window::App::new(build.styles, rx, path, bars);
+    let app = window::App::new(build.styles, rx, path.clone(), bars);
     window::install(app, driver);
+    tray::install(instance, driver, path)?;
     println!(
-        "vEnter embedded on {bar_count} monitor(s), {slot_count} module slot(s). Edit venter.json to reload live."
+        "Winbar embedded on {bar_count} monitor(s), {slot_count} module slot(s). Edit config.json to reload live."
     );
     window::run_message_loop();
     Ok(())

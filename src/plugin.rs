@@ -38,7 +38,7 @@ fn run_exec(name: &str, exec: &str) -> String {
     {
         Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         Err(e) => {
-            eprintln!("vEnter: module '{name}' exec failed: {e}");
+            eprintln!("Winbar: module '{name}' exec failed: {e}");
             String::new()
         }
     }
