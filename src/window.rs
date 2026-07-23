@@ -11,11 +11,11 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, GetParent,
-    GetWindow, GetWindowLongPtrW, GetWindowRect, IsWindowVisible, KillTimer, PostQuitMessage,
-    RegisterClassW, SetLayeredWindowAttributes, SetParent, SetTimer, SetWindowLongPtrW,
-    SetWindowPos, TranslateMessage, GWLP_USERDATA, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, HWND_TOP,
-    LWA_COLORKEY, MSG, SWP_SHOWWINDOW, WINDOW_STYLE, WM_DESTROY, WM_PAINT, WM_TIMER, WNDCLASSW,
-    WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_POPUP, WS_VISIBLE,
+    GetWindow, GetWindowLongPtrW, GetWindowRect, IsWindowVisible, KillTimer, LoadCursorW,
+    PostQuitMessage, RegisterClassW, SetLayeredWindowAttributes, SetParent, SetTimer,
+    SetWindowLongPtrW, SetWindowPos, TranslateMessage, GWLP_USERDATA, GWL_STYLE, GW_CHILD,
+    GW_HWNDNEXT, HWND_TOP, IDC_ARROW, LWA_COLORKEY, MSG, SWP_SHOWWINDOW, WINDOW_STYLE, WM_DESTROY,
+    WM_PAINT, WM_TIMER, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_POPUP, WS_VISIBLE,
 };
 
 use crate::css::Style;
@@ -117,6 +117,9 @@ pub fn create_window(state: Box<State>) -> Result<HWND> {
             hInstance: instance.into(),
             lpszClassName: w!("vEnterTaskbarWindow"),
             hbrBackground: CreateSolidBrush(COLORREF(0x0000_0000)), // black = transparent key
+            // A NULL class cursor makes Windows show the app-starting (busy)
+            // cursor when the pointer is over us; use the standard arrow.
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             ..Default::default()
         };
         RegisterClassW(&wc);
