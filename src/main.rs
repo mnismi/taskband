@@ -1,6 +1,7 @@
 mod config;
 mod css;
 mod layout;
+mod plugin;
 mod taskbar;
 mod window;
 
