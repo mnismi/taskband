@@ -11,11 +11,11 @@
     "cpu": {
         "exec": "powershell -NoProfile -Command \"'CPU ' + (Get-CimInstance Win32_Processor).LoadPercentage + '%'\"",
         "interval": 2,
-        "css": { "color": "#7fdbb0", "font-weight": "bold" }
+        "css": { "color": "#7fdbb0", "font-weight": "bold", "font-size": "14px" }
     },
     "clock": {
-        "exec": "powershell -NoProfile -Command \"(Get-Date).ToString('HH:mm:ss')\"",
+        "exec": "powershell -NoProfile -Command \"(Get-Date).ToString('ddd dd MMM'); (Get-Date).ToString('HH:mm:ss')\"",
         "interval": 1,
-        "css": { "color": "#ffffff" }
+        "css": { "color": "#ffffff", "font-size": "14px", "text-align": "left" }
     }
 }
