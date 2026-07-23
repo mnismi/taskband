@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Color {
     pub r: u8,
@@ -97,9 +99,73 @@ pub fn parse_edges(s: &str) -> Option<Edges> {
     Some(e)
 }
 
+/// Merge top-level defaults then a module's own css into a resolved Style.
+/// Module properties win. Invalid values and unknown properties are ignored
+/// (with a warning) so one bad line never breaks the bar.
+pub fn resolve(default_css: &HashMap<String, String>, module_css: &HashMap<String, String>) -> Style {
+    let mut style = Style::default();
+    apply(&mut style, default_css);
+    apply(&mut style, module_css);
+    style
+}
+
+fn apply(style: &mut Style, css: &HashMap<String, String>) {
+    for (key, value) in css {
+        match key.as_str() {
+            "color" => set(parse_color(value), |c| style.color = c, key, value),
+            "background-color" => set(parse_color(value), |c| style.background = Some(c), key, value),
+            "font-family" => style.font_family = value.trim().to_string(),
+            "font-size" => set(parse_px(value), |px| style.font_size = px, key, value),
+            "font-weight" => set(parse_weight(value), |w| style.font_weight = w, key, value),
+            "padding" => set(parse_edges(value), |e| style.padding = e, key, value),
+            "margin" => set(parse_edges(value), |e| style.margin = e, key, value),
+            other => eprintln!("vEnter: unknown css property '{other}' (ignored)"),
+        }
+    }
+}
+
+/// Apply a parsed value, or warn and leave the current value unchanged.
+fn set<T>(parsed: Option<T>, mut assign: impl FnMut(T), key: &str, value: &str) {
+    match parsed {
+        Some(v) => assign(v),
+        None => eprintln!("vEnter: invalid value '{value}' for css '{key}' (ignored)"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    fn css(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn module_css_overrides_defaults() {
+        let defaults = css(&[("color", "#d0d0d0"), ("font-size", "12px"), ("padding", "0 8px")]);
+        let module = css(&[("color", "#7fdbb0"), ("font-weight", "bold")]);
+        let style = resolve(&defaults, &module);
+
+        assert_eq!(style.color, Color { r: 0x7f, g: 0xdb, b: 0xb0 }); // overridden
+        assert_eq!(style.font_size, 12); // from defaults
+        assert_eq!(style.font_weight, 700); // from module
+        assert_eq!(style.padding, Edges { top: 0, right: 8, bottom: 0, left: 8 });
+        assert_eq!(style.background, None); // never set
+    }
+
+    #[test]
+    fn background_color_is_applied() {
+        let style = resolve(&HashMap::new(), &css(&[("background-color", "#303040")]));
+        assert_eq!(style.background, Some(Color { r: 0x30, g: 0x30, b: 0x40 }));
+    }
+
+    #[test]
+    fn invalid_and_unknown_values_are_ignored() {
+        // bad color keeps the default; unknown property is dropped
+        let style = resolve(&HashMap::new(), &css(&[("color", "notacolor"), ("wobble", "3")]));
+        assert_eq!(style.color, Style::default().color);
+    }
 
     #[test]
     fn default_style_is_light_gray_segoe_12() {

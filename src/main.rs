@@ -28,9 +28,12 @@ fn main() -> windows::core::Result<()> {
         eprintln!("vEnter: no modules to render (check \"modules-right\" in {})", path.display());
     }
 
-    // Increment 1: every module uses the default style. Increment 2 swaps this
-    // for css::resolve(&cfg.css, &m.css).
-    let styles: Vec<css::Style> = ordered.iter().map(|_| css::Style::default()).collect();
+    // Resolve each module's style: top-level css defaults overridden by the
+    // module's own css.
+    let styles: Vec<css::Style> = ordered
+        .iter()
+        .map(|(_, m)| css::resolve(&cfg.css, &m.css))
+        .collect();
 
     let specs: Vec<plugin::PluginSpec> = ordered
         .iter()
