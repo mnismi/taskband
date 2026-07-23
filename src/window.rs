@@ -3,7 +3,7 @@ use std::sync::mpsc::Receiver;
 use std::time::SystemTime;
 
 use windows::core::{w, PCWSTR, Result};
-use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, GetDC,
     GetTextMetricsW, InvalidateRect, ReleaseDC, SelectObject, SetBkMode, SetTextColor,
@@ -13,12 +13,12 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, GetParent,
-    GetWindow, GetWindowLongPtrW, GetWindowRect, IsWindowVisible, KillTimer, LoadCursorW,
-    PostQuitMessage, RegisterClassW, SetLayeredWindowAttributes, SetParent, SetTimer,
-    SetWindowLongPtrW, SetWindowPos, TranslateMessage, GWLP_USERDATA, GWL_STYLE, GW_CHILD,
-    GW_HWNDNEXT, HWND_TOP, IDC_ARROW, LWA_COLORKEY, MSG, SWP_SHOWWINDOW, WINDOW_STYLE, WM_DESTROY,
-    WM_PAINT, WM_TIMER, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_POPUP, WS_VISIBLE,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, GetWindow,
+    GetWindowLongPtrW, GetWindowRect, IsWindowVisible, KillTimer, LoadCursorW, PostQuitMessage,
+    RegisterClassW, SetLayeredWindowAttributes, SetParent, SetTimer, SetWindowLongPtrW,
+    SetWindowPos, TranslateMessage, GWLP_USERDATA, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, HWND_TOP,
+    IDC_ARROW, LWA_COLORKEY, MSG, SWP_SHOWWINDOW, WINDOW_STYLE, WM_DESTROY, WM_PAINT, WM_TIMER,
+    WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_POPUP, WS_VISIBLE,
 };
 
 use crate::css::{Style, TextAlign};
@@ -28,32 +28,72 @@ const TIMER_ID: usize = 1;
 const TIMER_MS: u32 = 250;
 const GAP: i32 = 8;
 
-/// UI-thread render state, attached to the window via GWLP_USERDATA. Only the UI
-/// thread touches it. The worker thread owns nothing here — it only sends Updates.
-pub struct State {
-    texts: Vec<String>,
-    styles: Vec<Style>,
+/// One monitor's bar: its layered child window on that monitor's taskbar plus the
+/// layout of the module slots it shows. Slots index into `App::texts`/`styles`.
+pub struct Bar {
+    hwnd: HWND,
+    taskbar: HWND,
+    monitor_index: usize,
+    primary: bool,
+    modules: Vec<usize>,
     widths: Vec<i32>,
     offsets: Vec<i32>,
     total_width: i32,
-    rx: Receiver<Update>,
-    path: PathBuf,
-    mtime: Option<SystemTime>,
+    /// Pixels reserved at the taskbar's right edge for the OS clock. Zero on the
+    /// primary (its tray is a detectable obstacle); the configured value on a
+    /// secondary, whose clock has no obstacle window.
+    clock_reserve: i32,
 }
 
-impl State {
-    pub fn new(styles: Vec<Style>, rx: Receiver<Update>, path: PathBuf) -> Self {
-        let n = styles.len();
-        let mtime = file_mtime(&path);
-        State {
-            texts: vec![String::new(); n],
+impl Bar {
+    pub fn new(
+        hwnd: HWND,
+        taskbar: HWND,
+        monitor_index: usize,
+        primary: bool,
+        modules: Vec<usize>,
+        clock_reserve: i32,
+    ) -> Self {
+        let n = modules.len();
+        Bar {
+            hwnd,
+            taskbar,
+            monitor_index,
+            primary,
+            modules,
             widths: vec![0; n],
             offsets: vec![0; n],
             total_width: 0,
+            clock_reserve: if primary { 0 } else { clock_reserve },
+        }
+    }
+
+    pub fn hwnd(&self) -> HWND {
+        self.hwnd
+    }
+}
+
+/// Shared UI-thread render state: per-slot texts/styles plus every monitor's bar.
+/// Only the UI thread touches it; the worker thread only sends `Update`s.
+pub struct App {
+    texts: Vec<String>,
+    styles: Vec<Style>,
+    rx: Receiver<Update>,
+    path: PathBuf,
+    mtime: Option<SystemTime>,
+    bars: Vec<Bar>,
+}
+
+impl App {
+    pub fn new(styles: Vec<Style>, rx: Receiver<Update>, path: PathBuf, bars: Vec<Bar>) -> Self {
+        let mtime = file_mtime(&path);
+        App {
+            texts: vec![String::new(); styles.len()],
             styles,
             rx,
             path,
             mtime,
+            bars,
         }
     }
 }
@@ -63,20 +103,17 @@ fn file_mtime(path: &Path) -> Option<SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
-/// If the config file changed on disk since we last looked, re-parse it and
-/// apply the new styles/modules with a fresh worker thread. A config that fails
-/// to parse (e.g. saved mid-edit) is ignored, keeping the running config.
-/// Returns true if a reload was applied (the caller should relayout + repaint).
-unsafe fn maybe_reload(state: &mut State) -> bool {
-    let current = file_mtime(&state.path);
-    if current == state.mtime {
+/// If the config changed on disk, re-parse it and rebuild the registry + each
+/// bar's slot list with a fresh worker. A config that fails to parse is ignored,
+/// keeping the running config. Returns true if a reload was applied.
+unsafe fn maybe_reload(app: &mut App) -> bool {
+    let current = file_mtime(&app.path);
+    if current == app.mtime {
         return false;
     }
-    // Record the observed mtime regardless, so a persistently-broken file does
-    // not trigger a reload attempt on every tick.
-    state.mtime = current;
+    app.mtime = current;
 
-    let cfg = match crate::config::load(&state.path) {
+    let cfg = match crate::config::load(&app.path) {
         Ok(cfg) => cfg,
         Err(e) => {
             eprintln!("vEnter: reload skipped — {e}");
@@ -84,18 +121,25 @@ unsafe fn maybe_reload(state: &mut State) -> bool {
         }
     };
 
-    let (styles, specs) = crate::config::build(&cfg);
-    let n = styles.len();
+    let build = crate::config::build_registry(&cfg);
+    let n = build.styles.len();
     // Spawn the new worker first; assigning its receiver drops the old one,
     // which makes the old worker exit on its next send.
-    let rx = crate::plugin::spawn_worker(specs);
-    state.styles = styles;
-    state.texts = vec![String::new(); n];
-    state.widths = vec![0; n];
-    state.offsets = vec![0; n];
-    state.total_width = 0;
-    state.rx = rx;
-    println!("vEnter: reloaded config — {n} module(s).");
+    let rx = crate::plugin::spawn_worker(build.specs);
+    app.styles = build.styles;
+    app.texts = vec![String::new(); n];
+    app.rx = rx;
+    for bar in &mut app.bars {
+        let slots =
+            crate::config::slots_for_monitor(&build.monitors, &build.legacy, bar.monitor_index, bar.primary);
+        let m = slots.len();
+        bar.modules = slots;
+        bar.widths = vec![0; m];
+        bar.offsets = vec![0; m];
+        bar.total_width = 0;
+        bar.clock_reserve = if bar.primary { 0 } else { build.clock_reserve };
+    }
+    println!("vEnter: reloaded config — {n} module slot(s).");
     true
 }
 
@@ -104,14 +148,14 @@ unsafe fn make_font(style: &Style) -> HFONT {
     let mut face: Vec<u16> = style.font_family.encode_utf16().collect();
     face.push(0);
     CreateFontW(
-        -style.font_size, // negative => character height in logical (pixel) units
+        -style.font_size,
         0,
         0,
         0,
         style.font_weight,
-        0, // italic
-        0, // underline
-        0, // strikeout
+        0,
+        0,
+        0,
         DEFAULT_CHARSET.0 as u32,
         OUT_DEFAULT_PRECIS.0 as u32,
         CLIP_DEFAULT_PRECIS.0 as u32,
@@ -135,8 +179,6 @@ fn align_flag(align: TextAlign) -> DRAW_TEXT_FORMAT {
 unsafe fn measure(hdc: HDC, style: &Style, text: &str) -> i32 {
     let font = make_font(style);
     let old = SelectObject(hdc, font);
-    // DrawTextW with an empty slice dereferences a dangling pointer (AV), so
-    // only measure non-empty lines; the max over zero lines is zero width.
     let mut text_w = 0;
     for line in text.lines() {
         if line.is_empty() {
@@ -149,44 +191,42 @@ unsafe fn measure(hdc: HDC, style: &Style, text: &str) -> i32 {
     }
     SelectObject(hdc, old);
     let _ = DeleteObject(font);
-    text_w
-        + style.padding.left
-        + style.padding.right
-        + style.margin.left
-        + style.margin.right
+    text_w + style.padding.left + style.padding.right + style.margin.left + style.margin.right
 }
 
-/// Re-measure all modules against current text and recompute offsets/total width.
-unsafe fn relayout(hwnd: HWND, state: &mut State) {
-    let hdc = GetDC(hwnd);
-    for i in 0..state.styles.len() {
-        state.widths[i] = measure(hdc, &state.styles[i], &state.texts[i]);
+/// Re-measure one bar's modules against current text and recompute its layout.
+unsafe fn relayout_bar(bar: &mut Bar, texts: &[String], styles: &[Style]) {
+    let hdc = GetDC(bar.hwnd);
+    bar.widths.clear();
+    for &slot in &bar.modules {
+        bar.widths.push(measure(hdc, &styles[slot], &texts[slot]));
     }
-    ReleaseDC(hwnd, hdc);
-    let (offsets, total) = crate::layout::place_modules(&state.widths);
-    state.offsets = offsets;
-    state.total_width = total;
+    ReleaseDC(bar.hwnd, hdc);
+    let (offsets, total) = crate::layout::place_modules(&bar.widths);
+    bar.offsets = offsets;
+    bar.total_width = total;
 }
 
-/// Create the layered taskbar window and attach its render state.
-pub fn create_window(state: Box<State>) -> Result<HWND> {
+/// Register the window class once. Returns the module instance for CreateWindow.
+pub fn register_class() -> Result<HINSTANCE> {
     unsafe {
         let instance = GetModuleHandleW(None)?;
-
         let wc = WNDCLASSW {
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
             lpszClassName: w!("vEnterTaskbarWindow"),
             hbrBackground: CreateSolidBrush(COLORREF(0x0000_0000)), // black = transparent key
-            // A NULL class cursor makes Windows show the app-starting (busy)
-            // cursor when the pointer is over us; use the standard arrow.
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             ..Default::default()
         };
         RegisterClassW(&wc);
+        Ok(instance.into())
+    }
+}
 
-        // WS_EX_LAYERED is required: the Windows 11 taskbar only composites
-        // layered windows. Color-key black => transparent (see design doc).
+/// Create one layered bar window (class must already be registered).
+pub fn create_bar_window(instance: HINSTANCE) -> Result<HWND> {
+    unsafe {
         let hwnd = CreateWindowExW(
             WS_EX_LAYERED,
             w!("vEnterTaskbarWindow"),
@@ -201,48 +241,41 @@ pub fn create_window(state: Box<State>) -> Result<HWND> {
             instance,
             None,
         )?;
-
         SetLayeredWindowAttributes(hwnd, COLORREF(0x0000_0000), 0, LWA_COLORKEY)?;
-
-        // Hand ownership of State to the window.
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(state) as isize);
-
         Ok(hwnd)
     }
 }
 
-/// Reparent `child` into the taskbar, make it a child window, place it, and
-/// start a timer that keeps it parked just left of the tray / embedded apps.
+/// Reparent `child` into `taskbar` and switch it to a child window.
 pub fn embed_in_taskbar(child: HWND, taskbar: HWND) -> Result<()> {
     unsafe {
         SetParent(child, taskbar)?;
-
         let current = WINDOW_STYLE(GetWindowLongPtrW(child, GWL_STYLE) as u32);
         let child_style = (current & !WS_POPUP) | WS_CHILD | WS_VISIBLE;
         SetWindowLongPtrW(child, GWL_STYLE, child_style.0 as isize);
-
-        reposition(child); // initial placement
-        SetTimer(child, TIMER_ID, TIMER_MS, None); // keep tracking taskbar changes
         Ok(())
     }
 }
 
-/// Recompute where the bar should sit (just left of the tray / embedded apps)
-/// using the current total width, and move it there only if something changed.
-fn reposition(hwnd: HWND) {
+/// Take ownership of `app`, point every bar window at it, and start the single
+/// driver timer on the `driver` window (the primary monitor's bar).
+pub fn install(app: App, driver: HWND) {
     unsafe {
-        let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const State;
-        let width = if state_ptr.is_null() {
-            0
-        } else {
-            (*state_ptr).total_width
-        };
+        let ptr = Box::into_raw(Box::new(app));
+        for bar in &(*ptr).bars {
+            SetWindowLongPtrW(bar.hwnd, GWLP_USERDATA, ptr as isize);
+        }
+        SetTimer(driver, TIMER_ID, TIMER_MS, None);
+    }
+}
 
-        let Ok(taskbar) = GetParent(hwnd) else {
-            return;
-        };
+/// Recompute where one bar should sit (just left of its taskbar's tray / embedded
+/// apps) and move it there only if something changed.
+fn reposition(bar: &Bar) {
+    unsafe {
+        let width = bar.total_width;
         let mut tb = RECT::default();
-        if GetWindowRect(taskbar, &mut tb).is_err() {
+        if GetWindowRect(bar.taskbar, &mut tb).is_err() {
             return;
         }
         let taskbar_left = tb.left;
@@ -252,9 +285,9 @@ fn reposition(hwnd: HWND) {
         // Obstacle = a visible sibling in the right half that is not full-width
         // (excludes the full-width XAML content bridge) and not our own window.
         let mut obstacles: Vec<i32> = Vec::new();
-        let mut sib = GetWindow(taskbar, GW_CHILD).ok();
+        let mut sib = GetWindow(bar.taskbar, GW_CHILD).ok();
         while let Some(h) = sib {
-            if h != hwnd && IsWindowVisible(h).as_bool() {
+            if h != bar.hwnd && IsWindowVisible(h).as_bool() {
                 let mut r = RECT::default();
                 if GetWindowRect(h, &mut r).is_ok() {
                     let w = r.right - r.left;
@@ -266,22 +299,29 @@ fn reposition(hwnd: HWND) {
             sib = GetWindow(h, GW_HWNDNEXT).ok();
         }
 
-        let x = crate::layout::compute_x(taskbar_left, taskbar_width, &obstacles, width, GAP);
+        let x = crate::layout::compute_x(
+            taskbar_left,
+            taskbar_width,
+            &obstacles,
+            width,
+            GAP,
+            bar.clock_reserve,
+        );
 
         let mut cur = RECT::default();
-        if GetWindowRect(hwnd, &mut cur).is_err() {
+        if GetWindowRect(bar.hwnd, &mut cur).is_err() {
             return;
         }
         let cur_x = cur.left - taskbar_left;
         let cur_w = cur.right - cur.left;
         let cur_h = cur.bottom - cur.top;
         if cur_x != x || cur_w != width || cur_h != tb_height {
-            let _ = SetWindowPos(hwnd, HWND_TOP, x, 0, width, tb_height, SWP_SHOWWINDOW);
+            let _ = SetWindowPos(bar.hwnd, HWND_TOP, x, 0, width, tb_height, SWP_SHOWWINDOW);
         }
     }
 }
 
-/// Blocking Win32 message loop. Returns when the window is destroyed.
+/// Blocking Win32 message loop. Returns when the driver window is destroyed.
 pub fn run_message_loop() {
     unsafe {
         let mut msg = MSG::default();
@@ -299,69 +339,66 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let mut ps = PAINTSTRUCT::default();
                 let hdc = BeginPaint(hwnd, &mut ps);
 
-                let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const State;
-                if !state_ptr.is_null() {
-                    let state = &*state_ptr;
-                    let mut client = RECT::default();
-                    let _ = GetClientRect(hwnd, &mut client);
-                    let height = client.bottom - client.top;
+                let app_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const App;
+                if !app_ptr.is_null() {
+                    let app = &*app_ptr;
+                    if let Some(bar) = app.bars.iter().find(|b| b.hwnd == hwnd) {
+                        let mut client = RECT::default();
+                        let _ = GetClientRect(hwnd, &mut client);
+                        let height = client.bottom - client.top;
 
-                    for i in 0..state.styles.len() {
-                        let style = &state.styles[i];
-                        let x0 = state.offsets[i];
-                        let w = state.widths[i];
+                        for i in 0..bar.modules.len() {
+                            let slot = bar.modules[i];
+                            let style = &app.styles[slot];
+                            let x0 = bar.offsets[i];
+                            let w = bar.widths[i];
 
-                        // Module box excludes its margins.
-                        let left = x0 + style.margin.left;
-                        let right = x0 + w - style.margin.right;
-                        let mrect = RECT { left, top: 0, right, bottom: height };
+                            let left = x0 + style.margin.left;
+                            let right = x0 + w - style.margin.right;
+                            let mrect = RECT { left, top: 0, right, bottom: height };
 
-                        // Background: real color if set, else the transparency key (black).
-                        let bg = match style.background {
-                            Some(c) => c.colorref(),
-                            None => 0x0000_0000,
-                        };
-                        let brush = CreateSolidBrush(COLORREF(bg));
-                        FillRect(hdc, &mrect, brush);
-                        let _ = DeleteObject(brush);
+                            let bg = match style.background {
+                                Some(c) => c.colorref(),
+                                None => 0x0000_0000,
+                            };
+                            let brush = CreateSolidBrush(COLORREF(bg));
+                            FillRect(hdc, &mrect, brush);
+                            let _ = DeleteObject(brush);
 
-                        // Text within the padded area.
-                        let font = make_font(style);
-                        let old = SelectObject(hdc, font);
-                        SetBkMode(hdc, TRANSPARENT);
-                        SetTextColor(hdc, COLORREF(style.color.colorref()));
+                            let font = make_font(style);
+                            let old = SelectObject(hdc, font);
+                            SetBkMode(hdc, TRANSPARENT);
+                            SetTextColor(hdc, COLORREF(style.color.colorref()));
 
-                        // Line height from the selected font's metrics.
-                        let mut tm = TEXTMETRICW::default();
-                        let line_h = if GetTextMetricsW(hdc, &mut tm).as_bool() {
-                            tm.tmHeight + tm.tmExternalLeading
-                        } else {
-                            style.font_size
-                        };
+                            let mut tm = TEXTMETRICW::default();
+                            let line_h = if GetTextMetricsW(hdc, &mut tm).as_bool() {
+                                tm.tmHeight + tm.tmExternalLeading
+                            } else {
+                                style.font_size
+                            };
 
-                        // Stack the lines and vertically center the whole block;
-                        // if it is taller than the strip, top-align (and clip).
-                        let text_left = left + style.padding.left;
-                        let text_right = right - style.padding.right;
-                        let lines: Vec<&str> = state.texts[i].lines().collect();
-                        let block_h = line_h * lines.len() as i32;
-                        let mut y = ((height - block_h) / 2).max(0);
-                        let flags = align_flag(style.text_align) | DT_VCENTER | DT_SINGLELINE;
-                        for line in lines {
-                            if !line.is_empty() {
-                                let mut lrect = RECT {
-                                    left: text_left,
-                                    top: y,
-                                    right: text_right,
-                                    bottom: y + line_h,
-                                };
-                                let mut utf16: Vec<u16> = line.encode_utf16().collect();
-                                DrawTextW(hdc, &mut utf16, &mut lrect, flags);
+                            let text_left = left + style.padding.left;
+                            let text_right = right - style.padding.right;
+                            let lines: Vec<&str> = app.texts[slot].lines().collect();
+                            let block_h = line_h * lines.len() as i32;
+                            let mut y = ((height - block_h) / 2).max(0);
+                            let flags = align_flag(style.text_align) | DT_VCENTER | DT_SINGLELINE;
+                            for line in lines {
+                                if !line.is_empty() {
+                                    let mut lrect = RECT {
+                                        left: text_left,
+                                        top: y,
+                                        right: text_right,
+                                        bottom: y + line_h,
+                                    };
+                                    let mut utf16: Vec<u16> = line.encode_utf16().collect();
+                                    DrawTextW(hdc, &mut utf16, &mut lrect, flags);
+                                }
+                                y += line_h;
                             }
-                            y += line_h;
+                            SelectObject(hdc, old);
+                            let _ = DeleteObject(font);
                         }
-                        SelectObject(hdc, old);
-                        let _ = DeleteObject(font);
                     }
                 }
 
@@ -369,33 +406,44 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_TIMER => {
-                let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State;
-                if !state_ptr.is_null() {
-                    let state = &mut *state_ptr;
-                    // A live config edit rebuilds styles/modules and counts as a change.
-                    let mut changed = maybe_reload(state);
-                    while let Ok(update) = state.rx.try_recv() {
-                        if update.index < state.texts.len()
-                            && state.texts[update.index] != update.text
-                        {
-                            state.texts[update.index] = update.text;
-                            changed = true;
+                let app_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut App;
+                if !app_ptr.is_null() {
+                    let app = &mut *app_ptr;
+                    // Reload first, so `changed` is sized to the current texts.
+                    let reloaded = maybe_reload(app);
+                    let mut changed = vec![false; app.texts.len()];
+                    while let Ok(update) = app.rx.try_recv() {
+                        if update.index < app.texts.len() && app.texts[update.index] != update.text {
+                            app.texts[update.index] = update.text;
+                            changed[update.index] = true;
                         }
                     }
-                    if changed {
-                        relayout(hwnd, state);
-                        let _ = InvalidateRect(hwnd, None, TRUE);
+                    let App { texts, styles, bars, .. } = app;
+                    for bar in bars.iter_mut() {
+                        let affected = reloaded
+                            || bar.modules.iter().any(|&s| changed.get(s).copied().unwrap_or(false));
+                        if affected {
+                            relayout_bar(bar, texts.as_slice(), styles.as_slice());
+                        }
+                        reposition(bar);
+                        if affected {
+                            let _ = InvalidateRect(bar.hwnd, None, TRUE);
+                        }
                     }
                 }
-                reposition(hwnd);
                 LRESULT(0)
             }
             WM_DESTROY => {
-                let _ = KillTimer(hwnd, TIMER_ID);
-                let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State;
-                if !ptr.is_null() {
-                    drop(Box::from_raw(ptr)); // drops State + rx (worker stops)
-                    SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+                let app_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut App;
+                if !app_ptr.is_null() {
+                    let app = Box::from_raw(app_ptr);
+                    // Null every bar's back-pointer (incl. self) so a sibling's later
+                    // WM_DESTROY is a no-op, and stop the driver timer.
+                    for bar in &app.bars {
+                        let _ = KillTimer(bar.hwnd, TIMER_ID);
+                        SetWindowLongPtrW(bar.hwnd, GWLP_USERDATA, 0);
+                    }
+                    drop(app); // drops rx (worker stops)
                 }
                 PostQuitMessage(0);
                 LRESULT(0)

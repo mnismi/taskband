@@ -8,6 +8,11 @@ pub struct RawConfig {
     pub modules_right: Vec<String>,
     #[serde(default)]
     pub css: HashMap<String, String>,
+    /// Pixels reserved at the right edge of each secondary taskbar for the
+    /// Windows 11 clock (which is painted in the XAML host and has no obstacle
+    /// window to detect). Ignored on the primary taskbar.
+    #[serde(rename = "secondary-clock-reserve", default = "default_clock_reserve")]
+    pub secondary_clock_reserve: i32,
     /// Per-monitor module routing, keyed by monitor index (as a string).
     #[serde(default)]
     pub monitors: HashMap<String, MonitorConfig>,
@@ -35,6 +40,12 @@ fn default_interval() -> u64 {
     5
 }
 
+/// Default pixels reserved for the secondary taskbar clock. Measured at ~81px
+/// for the two-line time/date at 100% scaling; 100 leaves headroom.
+fn default_clock_reserve() -> i32 {
+    100
+}
+
 /// Parse a JSONC (JSON5) config string. Comments and trailing commas allowed.
 pub fn parse(text: &str) -> Result<RawConfig, String> {
     json5::from_str(text).map_err(|e| e.to_string())
@@ -47,25 +58,6 @@ pub fn load(path: &Path) -> Result<RawConfig, String> {
     parse(&text).map_err(|e| format!("parsing {}: {e}", path.display()))
 }
 
-/// Turn a parsed config into the per-module render styles and plugin specs, in
-/// `modules-right` order. A name in `modules-right` without a definition is
-/// skipped; a name listed more than once produces that module more than once.
-pub fn build(cfg: &RawConfig) -> (Vec<crate::css::Style>, Vec<crate::plugin::PluginSpec>) {
-    let mut styles = Vec::new();
-    let mut specs = Vec::new();
-    for name in &cfg.modules_right {
-        if let Some(m) = cfg.modules.get(name) {
-            styles.push(crate::css::resolve(&cfg.css, &m.css));
-            specs.push(crate::plugin::PluginSpec {
-                name: name.clone(),
-                exec: m.exec.clone(),
-                interval: std::time::Duration::from_secs(m.interval.max(1)),
-            });
-        }
-    }
-    (styles, specs)
-}
-
 /// A resolved registry: per-slot styles/specs (each referenced module once),
 /// plus each monitor's ordered slot list and the legacy (primary-only) list.
 pub struct BuildResult {
@@ -73,6 +65,8 @@ pub struct BuildResult {
     pub specs: Vec<crate::plugin::PluginSpec>,
     pub monitors: HashMap<usize, Vec<usize>>,
     pub legacy: Vec<usize>,
+    /// Right-edge reserve for secondary taskbars (clock clearance), in pixels.
+    pub clock_reserve: i32,
 }
 
 /// Resolve a list of module names into slot indices, registering each newly-seen
@@ -136,7 +130,7 @@ pub fn build_registry(cfg: &RawConfig) -> BuildResult {
         Vec::new()
     };
 
-    BuildResult { styles, specs, monitors, legacy }
+    BuildResult { styles, specs, monitors, legacy, clock_reserve: cfg.secondary_clock_reserve }
 }
 
 /// The slot list a monitor should display: its `monitors` entry when the map is
@@ -202,34 +196,6 @@ mod tests {
     #[test]
     fn rejects_invalid_json() {
         assert!(parse("{ not valid").is_err());
-    }
-
-    #[test]
-    fn build_orders_modules_and_repeats_duplicates() {
-        let cfg = parse(
-            r##"{
-                "modules-right": ["cpu", "clock", "cpu"],
-                "css": { "color": "#d0d0d0" },
-                "cpu": { "exec": "echo c", "interval": 2, "css": { "color": "#7fdbb0" } },
-                "clock": { "exec": "echo t" }
-            }"##,
-        )
-        .expect("valid config");
-
-        let (styles, specs) = build(&cfg);
-
-        // modules-right order, with the duplicate "cpu" rendered twice.
-        let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(names, vec!["cpu", "clock", "cpu"]);
-        assert_eq!(styles.len(), 3);
-
-        // clock inherits the default interval (5s); cpu overrides to 2s.
-        assert_eq!(specs[0].interval, std::time::Duration::from_secs(2));
-        assert_eq!(specs[1].interval, std::time::Duration::from_secs(5));
-
-        // cpu's css override wins; clock falls back to the top-level default.
-        assert_eq!(styles[0].color, crate::css::Color { r: 0x7f, g: 0xdb, b: 0xb0 });
-        assert_eq!(styles[1].color, crate::css::Color { r: 0xd0, g: 0xd0, b: 0xd0 });
     }
 
     #[test]
@@ -311,6 +277,18 @@ mod tests {
         let b = build_registry(&cfg);
         assert_eq!(b.specs.len(), 1);
         assert_eq!(b.monitors.get(&0).unwrap(), &vec![0]); // "ghost" skipped
+    }
+
+    #[test]
+    fn secondary_clock_reserve_defaults_and_overrides() {
+        let def = parse(r##"{ "cpu": { "exec": "echo c" } }"##).expect("valid");
+        assert_eq!(build_registry(&def).clock_reserve, 100);
+
+        let over = parse(
+            r##"{ "secondary-clock-reserve": 140, "cpu": { "exec": "echo c" } }"##,
+        )
+        .expect("valid");
+        assert_eq!(build_registry(&over).clock_reserve, 140);
     }
 
     #[test]
