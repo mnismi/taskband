@@ -1,0 +1,135 @@
+<p align="center">
+  <img src="assets/winbar-logo-1024.png" width="128" alt="Winbar logo">
+</p>
+
+<h1 align="center">Winbar</h1>
+
+<p align="center">A Waybar-inspired status bar for the Windows taskbar.</p>
+
+<p align="center">
+  <a href="https://github.com/mnismi/winbar/actions/workflows/ci.yml"><img src="https://github.com/mnismi/winbar/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
+</p>
+
+Winbar renders config-driven status modules directly on the real Windows
+taskbar — CPU load, a clock, or anything a shell command can print. If you
+miss [Waybar](https://github.com/Alexays/Waybar) on Windows, this is for you.
+
+## Features
+
+- **Modules on the real taskbar** — no floating overlay window; bars embed
+  into the taskbar itself, on every monitor that has one
+- **Anything is a module** — a module is just a command (`exec`) run on an
+  `interval`; its output is rendered on the bar, multi-line output included
+- **Per-monitor routing** — send different modules to different monitors
+- **CSS-like styling** — global defaults plus per-module overrides for color,
+  background, font, padding, margin, and text alignment
+- **JSON5 config with live reload** — comments and trailing commas allowed;
+  edits apply instantly, no restart
+- **System tray** — reload config, edit config, toggle start-at-login, quit
+- **Single self-contained `.exe`** — a default config is baked in, so the
+  binary runs on its own
+
+## Installation
+
+Download `Winbar.exe` from the
+[latest release](https://github.com/mnismi/winbar/releases/latest) and run it.
+An icon appears in the system tray; right-click it to manage Winbar.
+
+Or build from source:
+
+```
+git clone https://github.com/mnismi/winbar.git
+cd winbar
+cargo build --release
+```
+
+The binary lands at `target/release/Winbar.exe`.
+
+## Configuration
+
+Winbar looks for `config.json` next to `Winbar.exe` first, then in the
+current working directory. If neither exists it uses the built-in default;
+the tray's **Edit config** writes that default out beside the exe so you can
+customize it. The file is watched — saving it reloads the bar live.
+
+The format is [JSON5](https://json5.org/), so comments and trailing commas
+are fine:
+
+```json5
+{
+    // Module order, left to right (rendered at the right end of the taskbar).
+    "modules": ["cpu", "clock"],
+
+    // Global style defaults, inherited by every module.
+    "css": {
+        "font-family": "Segoe UI",
+        "font-size": "12px",
+        "color": "#d0d0d0",
+        "padding": "0 8px"
+    },
+
+    // Each remaining top-level key defines a module.
+    "cpu": {
+        "exec": "powershell -NoProfile -Command \"'CPU ' + (Get-CimInstance Win32_Processor).LoadPercentage + '%'\"",
+        "interval": 2, // seconds between runs (default: 5)
+        "css": { "color": "#7fdbb0", "font-weight": "bold" }
+    },
+    "clock": {
+        // Each output line becomes a line on the bar.
+        "exec": "powershell -NoProfile -Command \"(Get-Date).ToString('ddd dd MMM'); (Get-Date).ToString('HH:mm:ss')\"",
+        "interval": 1,
+        "css": { "color": "#ffffff", "font-size": "14px" }
+    }
+}
+```
+
+### Modules
+
+| Key        | Type   | Default | Description                                    |
+| ---------- | ------ | ------- | ---------------------------------------------- |
+| `exec`     | string | —       | Command to run; stdout becomes the module text |
+| `interval` | number | `5`     | Seconds between runs                           |
+| `css`      | object | `{}`    | Style overrides for this module                |
+
+### Styling
+
+Supported CSS properties, in the global `css` block or per module:
+
+`color`, `background-color`, `font-family`, `font-size` (px),
+`font-weight` (`normal`, `bold`, or a number), `padding`, `margin`
+(1–4 edge values, px), `text-align` (`left`, `center`, `right`).
+
+### Multiple monitors
+
+By default all modules appear on the primary taskbar. To route modules per
+monitor, add a `monitors` map keyed by monitor index (shown in the console
+output of a debug build):
+
+```json5
+{
+    "modules": ["cpu", "clock"], // fallback for monitors not listed below
+    "monitors": {
+        "0": { "modules": ["cpu", "clock"] },
+        "1": { "modules": ["clock"] }
+    }
+}
+```
+
+Secondary taskbars need **Settings → Personalization → Taskbar → Show my
+taskbar on all displays** enabled. Windows 11 paints its own clock on
+secondary taskbars; `"secondary-clock-reserve"` (default `100`) reserves that
+many pixels at the right edge so modules don't overlap it.
+
+## Building from source
+
+Requires [Rust](https://rustup.rs/) stable on Windows.
+
+```
+cargo run             # debug build; keeps a console for diagnostics
+cargo build --release # console-less background app
+```
+
+## License
+
+[MIT](LICENSE)
