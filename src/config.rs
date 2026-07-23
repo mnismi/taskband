@@ -8,9 +8,18 @@ pub struct RawConfig {
     pub modules_right: Vec<String>,
     #[serde(default)]
     pub css: HashMap<String, String>,
+    /// Per-monitor module routing, keyed by monitor index (as a string).
+    #[serde(default)]
+    pub monitors: HashMap<String, MonitorConfig>,
     /// Every remaining top-level key is a module definition, keyed by name.
     #[serde(flatten)]
     pub modules: HashMap<String, ModuleConfig>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct MonitorConfig {
+    #[serde(rename = "modules-right", default)]
+    pub modules_right: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -131,5 +140,29 @@ mod tests {
         // cpu's css override wins; clock falls back to the top-level default.
         assert_eq!(styles[0].color, crate::css::Color { r: 0x7f, g: 0xdb, b: 0xb0 });
         assert_eq!(styles[1].color, crate::css::Color { r: 0xd0, g: 0xd0, b: 0xd0 });
+    }
+
+    #[test]
+    fn parses_monitors_map() {
+        let cfg = parse(
+            r##"{
+                "monitors": {
+                    "0": { "modules-right": ["cpu"] },
+                    "1": { "modules-right": ["clock", "net"] }
+                },
+                "cpu":   { "exec": "echo c" },
+                "clock": { "exec": "echo t" },
+                "net":   { "exec": "echo n" }
+            }"##,
+        )
+        .expect("valid config");
+
+        assert_eq!(cfg.monitors.get("0").unwrap().modules_right, vec!["cpu".to_string()]);
+        assert_eq!(
+            cfg.monitors.get("1").unwrap().modules_right,
+            vec!["clock".to_string(), "net".to_string()]
+        );
+        // module definitions still flatten correctly alongside the `monitors` field
+        assert!(cfg.modules.contains_key("net"));
     }
 }
