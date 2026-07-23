@@ -1,3 +1,4 @@
+mod layout;
 mod taskbar;
 mod window;
 
