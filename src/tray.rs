@@ -86,6 +86,9 @@ pub fn install(instance: HINSTANCE, driver: HWND, path: PathBuf) -> Result<()> {
         // Load the embedded app icon (resource id 1, set in build.rs) at the
         // system small-icon size so the tray gets the crisp 16px frame rather
         // than a downscaled large one. Fall back to the stock icon if missing.
+        // MAKEINTRESOURCE: the pointer's integer value IS the resource id, so
+        // clippy's `ptr::dangling` suggestion (address 2) would be wrong here.
+        #[allow(clippy::manual_dangling_ptr)]
         let hicon = LoadImageW(
             instance,
             PCWSTR(1 as *const u16),
