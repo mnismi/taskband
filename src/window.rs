@@ -6,12 +6,18 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW,
-    GetWindowLongPtrW, GetWindowRect, PostQuitMessage, RegisterClassW, SetLayeredWindowAttributes,
-    SetParent, SetWindowLongPtrW, SetWindowPos, TranslateMessage, GWL_STYLE, LWA_ALPHA, MSG,
-    SWP_FRAMECHANGED, SWP_NOZORDER, SWP_SHOWWINDOW, WINDOW_STYLE, WM_DESTROY, WM_PAINT, WNDCLASSW,
-    WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_POPUP, WS_VISIBLE,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, GetParent,
+    GetWindow, GetWindowLongPtrW, GetWindowRect, IsWindowVisible, KillTimer, PostQuitMessage,
+    RegisterClassW, SetLayeredWindowAttributes, SetParent, SetTimer, SetWindowLongPtrW,
+    SetWindowPos, TranslateMessage, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, HWND_TOP, LWA_ALPHA, MSG,
+    SWP_SHOWWINDOW, WINDOW_STYLE, WM_DESTROY, WM_PAINT, WM_TIMER, WNDCLASSW, WS_CHILD,
+    WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_POPUP, WS_VISIBLE,
 };
+
+const TIMER_ID: usize = 1;
+const TIMER_MS: u32 = 250;
+const WIDTH: i32 = 260;
+const GAP: i32 = 8;
 
 /// Create a standalone, visible window that paints the spike text.
 pub fn create_window() -> Result<HWND> {
@@ -51,37 +57,65 @@ pub fn create_window() -> Result<HWND> {
     }
 }
 
-/// Reparent `child` into the taskbar (`taskbar`), turn it into a child
-/// window, and position it inside the taskbar just left of the tray area.
+/// Reparent `child` into the taskbar, make it a child window, place it, and
+/// start a timer that keeps it parked just left of the tray / embedded apps.
 pub fn embed_in_taskbar(child: HWND, taskbar: HWND) -> Result<()> {
     unsafe {
-        // 1. Reparent our window into the taskbar.
         SetParent(child, taskbar)?;
 
-        // 2. Convert it to a child window so it clips to and moves with the taskbar.
         let current = WINDOW_STYLE(GetWindowLongPtrW(child, GWL_STYLE) as u32);
         let child_style = (current & !WS_POPUP) | WS_CHILD | WS_VISIBLE;
         SetWindowLongPtrW(child, GWL_STYLE, child_style.0 as isize);
 
-        // 3. Position inside the taskbar, leaving room on the right for the tray/clock.
+        reposition(child); // initial placement
+        SetTimer(child, TIMER_ID, TIMER_MS, None); // keep tracking taskbar changes
+        Ok(())
+    }
+}
+
+/// Recompute where the window should sit (just left of the tray / embedded
+/// apps) and move it there, but only if the target changed (avoids flicker).
+fn reposition(hwnd: HWND) {
+    unsafe {
+        let Ok(taskbar) = GetParent(hwnd) else {
+            return;
+        };
         let mut tb = RECT::default();
-        GetWindowRect(taskbar, &mut tb)?;
-        let tb_width = tb.right - tb.left;
+        if GetWindowRect(taskbar, &mut tb).is_err() {
+            return;
+        }
+        let taskbar_left = tb.left;
+        let taskbar_width = tb.right - tb.left;
         let tb_height = tb.bottom - tb.top;
 
-        let width = 260;
-        // Clearance leaves room on the right for the tray/clock and any existing
-        // embedded app (e.g. TrafficMonitor). Tuned for a 1920-wide taskbar; this
-        // is the spot the diagnostics confirmed renders in a clear area.
-        let x = (tb_width - width - 610).max(0);
-        SetWindowPos(
-            child,
-            None,
-            x, 0, width, tb_height,
-            SWP_NOZORDER | SWP_SHOWWINDOW | SWP_FRAMECHANGED,
-        )?;
+        // Obstacle = a visible sibling in the right half that is not full-width
+        // (excludes the full-width XAML content bridge) and not our own window.
+        let mut obstacles: Vec<i32> = Vec::new();
+        let mut sib = GetWindow(taskbar, GW_CHILD).ok();
+        while let Some(h) = sib {
+            if h != hwnd && IsWindowVisible(h).as_bool() {
+                let mut r = RECT::default();
+                if GetWindowRect(h, &mut r).is_ok() {
+                    let w = r.right - r.left;
+                    if r.left > taskbar_left + taskbar_width / 2 && w < taskbar_width {
+                        obstacles.push(r.left);
+                    }
+                }
+            }
+            sib = GetWindow(h, GW_HWNDNEXT).ok();
+        }
 
-        Ok(())
+        let x = crate::layout::compute_x(taskbar_left, taskbar_width, &obstacles, WIDTH, GAP);
+
+        let mut cur = RECT::default();
+        if GetWindowRect(hwnd, &mut cur).is_err() {
+            return;
+        }
+        let cur_x = cur.left - taskbar_left;
+        let cur_h = cur.bottom - cur.top;
+        if cur_x != x || cur_h != tb_height {
+            let _ = SetWindowPos(hwnd, HWND_TOP, x, 0, WIDTH, tb_height, SWP_SHOWWINDOW);
+        }
     }
 }
 
@@ -115,7 +149,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let _ = EndPaint(hwnd, &ps);
                 LRESULT(0)
             }
+            WM_TIMER => {
+                reposition(hwnd);
+                LRESULT(0)
+            }
             WM_DESTROY => {
+                let _ = KillTimer(hwnd, TIMER_ID);
                 PostQuitMessage(0);
                 LRESULT(0)
             }
