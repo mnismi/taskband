@@ -1,0 +1,22 @@
+{
+  // rendered left-to-right; the last entry sits nearest the tray
+  "modules-right": ["cpu", "clock"],
+
+  "css": {
+    "font-family": "Segoe UI",
+    "font-size": "12px",
+    "color": "#d0d0d0",
+    "padding": "0 8px"
+  },
+
+  "cpu": {
+    "exec": "powershell -NoProfile -Command \"'CPU ' + (Get-CimInstance Win32_Processor).LoadPercentage + '%'\"",
+    "interval": 2,
+    "css": { "color": "#7fdbb0", "font-weight": "bold" }
+  },
+  "clock": {
+    "exec": "powershell -NoProfile -Command \"(Get-Date).ToString('HH:mm:ss')\"",
+    "interval": 1,
+    "css": { "color": "#ffffff" }
+  }
+}
