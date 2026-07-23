@@ -6,9 +6,10 @@ use windows::core::{w, PCWSTR, Result};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, GetDC,
-    InvalidateRect, ReleaseDC, SelectObject, SetBkMode, SetTextColor, CLIP_DEFAULT_PRECIS,
-    DEFAULT_CHARSET, DEFAULT_PITCH, DEFAULT_QUALITY, DT_CALCRECT, DT_LEFT, DT_SINGLELINE,
-    DT_VCENTER, FF_DONTCARE, HDC, HFONT, OUT_DEFAULT_PRECIS, PAINTSTRUCT, TRANSPARENT,
+    GetTextMetricsW, InvalidateRect, ReleaseDC, SelectObject, SetBkMode, SetTextColor,
+    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DEFAULT_QUALITY, DRAW_TEXT_FORMAT,
+    DT_CALCRECT, DT_CENTER, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, HDC, HFONT,
+    OUT_DEFAULT_PRECIS, PAINTSTRUCT, TEXTMETRICW, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -20,7 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_PAINT, WM_TIMER, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_POPUP, WS_VISIBLE,
 };
 
-use crate::css::Style;
+use crate::css::{Style, TextAlign};
 use crate::plugin::Update;
 
 const TIMER_ID: usize = 1;
@@ -120,20 +121,32 @@ unsafe fn make_font(style: &Style) -> HFONT {
     )
 }
 
-/// Measure a module's full width: text extent + horizontal padding + margin.
+/// The DrawTextW horizontal-alignment flag for a resolved text alignment.
+fn align_flag(align: TextAlign) -> DRAW_TEXT_FORMAT {
+    match align {
+        TextAlign::Left => DT_LEFT,
+        TextAlign::Center => DT_CENTER,
+        TextAlign::Right => DT_RIGHT,
+    }
+}
+
+/// Measure a module's full width: widest line's extent + horizontal padding +
+/// margin. For multi-line text the module is as wide as its longest line.
 unsafe fn measure(hdc: HDC, style: &Style, text: &str) -> i32 {
     let font = make_font(style);
     let old = SelectObject(hdc, font);
     // DrawTextW with an empty slice dereferences a dangling pointer (AV), so
-    // only measure when there is text; empty text contributes zero text width.
-    let text_w = if text.is_empty() {
-        0
-    } else {
-        let mut utf16: Vec<u16> = text.encode_utf16().collect();
+    // only measure non-empty lines; the max over zero lines is zero width.
+    let mut text_w = 0;
+    for line in text.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        let mut utf16: Vec<u16> = line.encode_utf16().collect();
         let mut r = RECT::default();
         DrawTextW(hdc, &mut utf16, &mut r, DT_CALCRECT | DT_SINGLELINE | DT_LEFT);
-        r.right - r.left
-    };
+        text_w = text_w.max(r.right - r.left);
+    }
     SelectObject(hdc, old);
     let _ = DeleteObject(font);
     text_w
@@ -317,15 +330,35 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         let old = SelectObject(hdc, font);
                         SetBkMode(hdc, TRANSPARENT);
                         SetTextColor(hdc, COLORREF(style.color.colorref()));
-                        let mut trect = RECT {
-                            left: left + style.padding.left,
-                            top: 0,
-                            right: right - style.padding.right,
-                            bottom: height,
+
+                        // Line height from the selected font's metrics.
+                        let mut tm = TEXTMETRICW::default();
+                        let line_h = if GetTextMetricsW(hdc, &mut tm).as_bool() {
+                            tm.tmHeight + tm.tmExternalLeading
+                        } else {
+                            style.font_size
                         };
-                        if !state.texts[i].is_empty() {
-                            let mut utf16: Vec<u16> = state.texts[i].encode_utf16().collect();
-                            DrawTextW(hdc, &mut utf16, &mut trect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+                        // Stack the lines and vertically center the whole block;
+                        // if it is taller than the strip, top-align (and clip).
+                        let text_left = left + style.padding.left;
+                        let text_right = right - style.padding.right;
+                        let lines: Vec<&str> = state.texts[i].lines().collect();
+                        let block_h = line_h * lines.len() as i32;
+                        let mut y = ((height - block_h) / 2).max(0);
+                        let flags = align_flag(style.text_align) | DT_VCENTER | DT_SINGLELINE;
+                        for line in lines {
+                            if !line.is_empty() {
+                                let mut lrect = RECT {
+                                    left: text_left,
+                                    top: y,
+                                    right: text_right,
+                                    bottom: y + line_h,
+                                };
+                                let mut utf16: Vec<u16> = line.encode_utf16().collect();
+                                DrawTextW(hdc, &mut utf16, &mut lrect, flags);
+                            }
+                            y += line_h;
                         }
                         SelectObject(hdc, old);
                         let _ = DeleteObject(font);

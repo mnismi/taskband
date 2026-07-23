@@ -22,6 +22,14 @@ pub struct Edges {
     pub left: i32,
 }
 
+/// Horizontal alignment of a module's (possibly multi-line) text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Style {
     pub color: Color,
@@ -31,6 +39,7 @@ pub struct Style {
     pub font_weight: i32,
     pub padding: Edges,
     pub margin: Edges,
+    pub text_align: TextAlign,
 }
 
 impl Default for Style {
@@ -43,6 +52,7 @@ impl Default for Style {
             font_weight: 400,
             padding: Edges::default(),
             margin: Edges::default(),
+            text_align: TextAlign::Center,
         }
     }
 }
@@ -83,6 +93,16 @@ pub fn parse_weight(s: &str) -> Option<i32> {
     }
 }
 
+/// Parse a horizontal text alignment: `left`, `center`, or `right`.
+pub fn parse_text_align(s: &str) -> Option<TextAlign> {
+    match s.trim() {
+        "left" => Some(TextAlign::Left),
+        "center" => Some(TextAlign::Center),
+        "right" => Some(TextAlign::Right),
+        _ => None,
+    }
+}
+
 /// Parse 1–4 CSS-shorthand `px` values into T/R/B/L edges.
 pub fn parse_edges(s: &str) -> Option<Edges> {
     let parts: Vec<i32> = s
@@ -119,6 +139,7 @@ fn apply(style: &mut Style, css: &HashMap<String, String>) {
             "font-weight" => set(parse_weight(value), |w| style.font_weight = w, key, value),
             "padding" => set(parse_edges(value), |e| style.padding = e, key, value),
             "margin" => set(parse_edges(value), |e| style.margin = e, key, value),
+            "text-align" => set(parse_text_align(value), |a| style.text_align = a, key, value),
             other => eprintln!("vEnter: unknown css property '{other}' (ignored)"),
         }
     }
@@ -211,6 +232,25 @@ mod tests {
         assert_eq!(parse_weight("600"), Some(600));
         assert_eq!(parse_weight("50"), None);
         assert_eq!(parse_weight("999"), None);
+    }
+
+    #[test]
+    fn parses_text_align() {
+        assert_eq!(parse_text_align("left"), Some(TextAlign::Left));
+        assert_eq!(parse_text_align(" center "), Some(TextAlign::Center));
+        assert_eq!(parse_text_align("right"), Some(TextAlign::Right));
+        assert_eq!(parse_text_align("justify"), None);
+        assert_eq!(parse_text_align(""), None);
+    }
+
+    #[test]
+    fn text_align_defaults_to_center_and_overrides() {
+        assert_eq!(Style::default().text_align, TextAlign::Center);
+        let style = resolve(&HashMap::new(), &css(&[("text-align", "right")]));
+        assert_eq!(style.text_align, TextAlign::Right);
+        // an invalid value keeps the default
+        let style = resolve(&HashMap::new(), &css(&[("text-align", "sideways")]));
+        assert_eq!(style.text_align, TextAlign::Center);
     }
 
     #[test]
