@@ -66,6 +66,96 @@ pub fn build(cfg: &RawConfig) -> (Vec<crate::css::Style>, Vec<crate::plugin::Plu
     (styles, specs)
 }
 
+/// A resolved registry: per-slot styles/specs (each referenced module once),
+/// plus each monitor's ordered slot list and the legacy (primary-only) list.
+pub struct BuildResult {
+    pub styles: Vec<crate::css::Style>,
+    pub specs: Vec<crate::plugin::PluginSpec>,
+    pub monitors: HashMap<usize, Vec<usize>>,
+    pub legacy: Vec<usize>,
+}
+
+/// Resolve a list of module names into slot indices, registering each newly-seen
+/// module (its style + spec) into the shared registry. Undefined names warn and
+/// are skipped; a repeated name reuses its existing slot.
+fn resolve_list(
+    names: &[String],
+    cfg: &RawConfig,
+    styles: &mut Vec<crate::css::Style>,
+    specs: &mut Vec<crate::plugin::PluginSpec>,
+    slot_of: &mut HashMap<String, usize>,
+) -> Vec<usize> {
+    let mut slots = Vec::new();
+    for name in names {
+        if let Some(&slot) = slot_of.get(name) {
+            slots.push(slot);
+            continue;
+        }
+        match cfg.modules.get(name) {
+            Some(m) => {
+                let slot = styles.len();
+                styles.push(crate::css::resolve(&cfg.css, &m.css));
+                specs.push(crate::plugin::PluginSpec {
+                    name: name.clone(),
+                    exec: m.exec.clone(),
+                    interval: std::time::Duration::from_secs(m.interval.max(1)),
+                });
+                slot_of.insert(name.clone(), slot);
+                slots.push(slot);
+            }
+            None => eprintln!("vEnter: module '{name}' is not defined (skipped)"),
+        }
+    }
+    slots
+}
+
+/// Build the shared registry plus per-monitor slot lists. When `monitors` is
+/// present it wins (and top-level `modules-right` is ignored with a warning);
+/// otherwise `legacy` holds the top-level `modules-right` slots for the primary.
+pub fn build_registry(cfg: &RawConfig) -> BuildResult {
+    let mut styles = Vec::new();
+    let mut specs = Vec::new();
+    let mut slot_of: HashMap<String, usize> = HashMap::new();
+
+    let mut monitors = HashMap::new();
+    for (key, mc) in &cfg.monitors {
+        let Ok(index) = key.parse::<usize>() else {
+            eprintln!("vEnter: monitor key '{key}' is not a valid index (skipped)");
+            continue;
+        };
+        let slots = resolve_list(&mc.modules_right, cfg, &mut styles, &mut specs, &mut slot_of);
+        monitors.insert(index, slots);
+    }
+
+    let legacy = if cfg.monitors.is_empty() {
+        resolve_list(&cfg.modules_right, cfg, &mut styles, &mut specs, &mut slot_of)
+    } else {
+        if !cfg.modules_right.is_empty() {
+            eprintln!("vEnter: 'monitors' is set; top-level 'modules-right' is ignored");
+        }
+        Vec::new()
+    };
+
+    BuildResult { styles, specs, monitors, legacy }
+}
+
+/// The slot list a monitor should display: its `monitors` entry when the map is
+/// non-empty (empty for unlisted monitors), else the legacy list on the primary.
+pub fn slots_for_monitor(
+    monitors: &HashMap<usize, Vec<usize>>,
+    legacy: &[usize],
+    index: usize,
+    primary: bool,
+) -> Vec<usize> {
+    if !monitors.is_empty() {
+        monitors.get(&index).cloned().unwrap_or_default()
+    } else if primary {
+        legacy.to_vec()
+    } else {
+        Vec::new()
+    }
+}
+
 /// Resolve the config path: `venter.json` next to the executable, else `venter.json`
 /// in the current working directory.
 pub fn config_path() -> PathBuf {
@@ -164,5 +254,78 @@ mod tests {
         );
         // module definitions still flatten correctly alongside the `monitors` field
         assert!(cfg.modules.contains_key("net"));
+    }
+
+    #[test]
+    fn build_registry_dedups_modules_shared_across_monitors() {
+        let cfg = parse(
+            r##"{
+                "monitors": {
+                    "0": { "modules-right": ["cpu", "clock"] },
+                    "1": { "modules-right": ["clock", "cpu"] }
+                },
+                "cpu":   { "exec": "echo c" },
+                "clock": { "exec": "echo t" }
+            }"##,
+        )
+        .expect("valid config");
+
+        let b = build_registry(&cfg);
+        // two unique modules -> two slots (each runs once)
+        assert_eq!(b.specs.len(), 2);
+        assert_eq!(b.styles.len(), 2);
+        // first-seen order assigns slots: cpu=0, clock=1
+        assert_eq!(b.monitors.get(&0).unwrap(), &vec![0, 1]);
+        assert_eq!(b.monitors.get(&1).unwrap(), &vec![1, 0]);
+        assert!(b.legacy.is_empty());
+    }
+
+    #[test]
+    fn build_registry_legacy_fallback_when_no_monitors_key() {
+        let cfg = parse(
+            r##"{
+                "modules-right": ["cpu", "clock", "cpu"],
+                "cpu":   { "exec": "echo c" },
+                "clock": { "exec": "echo t" }
+            }"##,
+        )
+        .expect("valid config");
+
+        let b = build_registry(&cfg);
+        assert!(b.monitors.is_empty());
+        // duplicate "cpu" dedups to one slot but appears twice in the ordered list
+        assert_eq!(b.specs.len(), 2);
+        assert_eq!(b.legacy, vec![0, 1, 0]);
+    }
+
+    #[test]
+    fn build_registry_skips_undefined_modules() {
+        let cfg = parse(
+            r##"{
+                "monitors": { "0": { "modules-right": ["cpu", "ghost"] } },
+                "cpu": { "exec": "echo c" }
+            }"##,
+        )
+        .expect("valid config");
+
+        let b = build_registry(&cfg);
+        assert_eq!(b.specs.len(), 1);
+        assert_eq!(b.monitors.get(&0).unwrap(), &vec![0]); // "ghost" skipped
+    }
+
+    #[test]
+    fn slots_for_monitor_prefers_map_then_legacy() {
+        let mut monitors = HashMap::new();
+        monitors.insert(0usize, vec![0, 1]);
+        let legacy = vec![2];
+
+        // map present: listed monitor uses its entry; unlisted monitor -> empty
+        assert_eq!(slots_for_monitor(&monitors, &legacy, 0, true), vec![0, 1]);
+        assert_eq!(slots_for_monitor(&monitors, &legacy, 5, false), Vec::<usize>::new());
+
+        // map empty: primary uses legacy, non-primary -> empty
+        let empty: HashMap<usize, Vec<usize>> = HashMap::new();
+        assert_eq!(slots_for_monitor(&empty, &legacy, 3, true), vec![2]);
+        assert_eq!(slots_for_monitor(&empty, &legacy, 3, false), Vec::<usize>::new());
     }
 }
