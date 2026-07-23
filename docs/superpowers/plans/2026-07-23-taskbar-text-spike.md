@@ -374,6 +374,15 @@ git commit -m "feat: embed the vEnter window into the native taskbar"
 
 ---
 
+## Implementation note (discovered during execution)
+
+Task 3 as originally written created a plain GDI child, which is **invisible** on the
+Windows 11 taskbar (DWM composites only layered windows onto it). The shipped
+`create_window` therefore adds `WS_EX_LAYERED` and calls
+`SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)`. See the spec's "Findings"
+section for the full root-cause writeup. The landing-x clearance was also tuned
+(220 → 610) so the opaque window lands in a clear area on a 1920-wide taskbar.
+
 ## Notes for the next iteration (out of scope now)
 
 Once the spike is confirmed, the natural next steps (deferred per the spec) are: swap the hardcoded string for real metrics behind the painter, re-embed after `explorer.exe` restarts (listen for the `TaskbarCreated` message), handle DPI/positioning robustly, and clean teardown on exit. Do not build these until the spike is verified.

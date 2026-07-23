@@ -90,3 +90,27 @@ spike stays a spike:
 - **Rendering quirks:** the Win11 taskbar is XAML-based; a reparented GDI child
   generally still paints, but background transparency may look imperfect. Acceptable
   for a spike.
+
+## Findings (spike outcome — 2026-07-23)
+
+**Spike succeeded.** `vEnter.exe` renders `vEnter ▲ hello` inside the real Windows
+11 taskbar (confirmed by screen capture and by eye), sitting alongside the existing
+TrafficMonitor stats.
+
+**Key discovery — the window must be layered.** On Windows 11 the taskbar is
+DWM-composited, and DWM only composites **layered** windows onto it. A plain GDI
+child reparented into `Shell_TrayWnd` is invisible regardless of position or
+z-order — it reports `IsWindowVisible = true` and sits at the top of the child
+z-order, yet never appears. Diagnostics confirmed the working reference
+(TrafficMonitor's `#32770` window) carries `WS_EX_LAYERED`. The fix:
+
+1. Create the window with `WS_EX_LAYERED`.
+2. Call `SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA)` so it is opaque and
+   paints normally through `WM_PAINT`.
+
+This is the single most important thing to carry into the next iteration. It was
+not obvious from the original approach, which assumed a plain GDI child would paint.
+
+**Positioning note:** the landing x is tuned for a 1920-wide taskbar (placed left
+of the tray and the existing TrafficMonitor). Robust positioning across widths,
+DPI, and secondary taskbars remains deferred as originally scoped.

@@ -6,9 +6,11 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, PostQuitMessage,
-    RegisterClassW, TranslateMessage, MSG, WINDOW_EX_STYLE, WM_DESTROY, WM_PAINT, WNDCLASSW,
-    WS_POPUP, WS_VISIBLE,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW,
+    GetWindowLongPtrW, GetWindowRect, PostQuitMessage, RegisterClassW, SetLayeredWindowAttributes,
+    SetParent, SetWindowLongPtrW, SetWindowPos, TranslateMessage, GWL_STYLE, LWA_ALPHA, MSG,
+    SWP_FRAMECHANGED, SWP_NOZORDER, SWP_SHOWWINDOW, WINDOW_STYLE, WM_DESTROY, WM_PAINT, WNDCLASSW,
+    WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_POPUP, WS_VISIBLE,
 };
 
 /// Create a standalone, visible window that paints the spike text.
@@ -25,11 +27,14 @@ pub fn create_window() -> Result<HWND> {
         };
         RegisterClassW(&wc);
 
+        // WS_EX_LAYERED is required: on Windows 11 the taskbar is DWM-composited
+        // and only composites layered windows. A plain GDI child reparented into
+        // Shell_TrayWnd stays invisible regardless of position or z-order.
         let hwnd = CreateWindowExW(
-            WINDOW_EX_STYLE::default(),
+            WS_EX_LAYERED,
             w!("vEnterTaskbarWindow"),
             w!("vEnter ▲ hello"),
-            WS_POPUP | WS_VISIBLE,
+            WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS,
             100, 100,   // x, y on screen
             260, 40,    // width, height
             None,       // no parent (top-level for now)
@@ -38,7 +43,45 @@ pub fn create_window() -> Result<HWND> {
             None,       // no create param
         )?;
 
+        // A layered window is invisible until its attributes are set. Make it
+        // fully opaque; it then paints normally through WM_PAINT.
+        SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA)?;
+
         Ok(hwnd)
+    }
+}
+
+/// Reparent `child` into the taskbar (`taskbar`), turn it into a child
+/// window, and position it inside the taskbar just left of the tray area.
+pub fn embed_in_taskbar(child: HWND, taskbar: HWND) -> Result<()> {
+    unsafe {
+        // 1. Reparent our window into the taskbar.
+        SetParent(child, taskbar)?;
+
+        // 2. Convert it to a child window so it clips to and moves with the taskbar.
+        let current = WINDOW_STYLE(GetWindowLongPtrW(child, GWL_STYLE) as u32);
+        let child_style = (current & !WS_POPUP) | WS_CHILD | WS_VISIBLE;
+        SetWindowLongPtrW(child, GWL_STYLE, child_style.0 as isize);
+
+        // 3. Position inside the taskbar, leaving room on the right for the tray/clock.
+        let mut tb = RECT::default();
+        GetWindowRect(taskbar, &mut tb)?;
+        let tb_width = tb.right - tb.left;
+        let tb_height = tb.bottom - tb.top;
+
+        let width = 260;
+        // Clearance leaves room on the right for the tray/clock and any existing
+        // embedded app (e.g. TrafficMonitor). Tuned for a 1920-wide taskbar; this
+        // is the spot the diagnostics confirmed renders in a clear area.
+        let x = (tb_width - width - 610).max(0);
+        SetWindowPos(
+            child,
+            None,
+            x, 0, width, tb_height,
+            SWP_NOZORDER | SWP_SHOWWINDOW | SWP_FRAMECHANGED,
+        )?;
+
+        Ok(())
     }
 }
 

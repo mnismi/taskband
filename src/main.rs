@@ -2,8 +2,10 @@ mod taskbar;
 mod window;
 
 fn main() -> windows::core::Result<()> {
-    let _hwnd = window::create_window()?;
-    println!("Standalone vEnter window created near the top-left of the screen.");
+    let taskbar = taskbar::find_taskbar()?;
+    let child = window::create_window()?;
+    window::embed_in_taskbar(child, taskbar)?;
+    println!("vEnter embedded into the taskbar — look to the left of the tray/clock.");
     window::run_message_loop();
     Ok(())
 }
