@@ -1,8 +1,9 @@
 mod taskbar;
+mod window;
 
-fn main() {
-    match taskbar::find_taskbar() {
-        Ok(hwnd) => println!("Found taskbar (Shell_TrayWnd): {hwnd:?}"),
-        Err(e) => eprintln!("Failed to find taskbar: {e}"),
-    }
+fn main() -> windows::core::Result<()> {
+    let _hwnd = window::create_window()?;
+    println!("Standalone vEnter window created near the top-left of the screen.");
+    window::run_message_loop();
+    Ok(())
 }
