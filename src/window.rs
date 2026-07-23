@@ -9,7 +9,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, GetParent,
     GetWindow, GetWindowLongPtrW, GetWindowRect, IsWindowVisible, KillTimer, PostQuitMessage,
     RegisterClassW, SetLayeredWindowAttributes, SetParent, SetTimer, SetWindowLongPtrW,
-    SetWindowPos, TranslateMessage, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, HWND_TOP, LWA_ALPHA, MSG,
+    SetWindowPos, TranslateMessage, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, HWND_TOP, LWA_COLORKEY, MSG,
     SWP_SHOWWINDOW, WINDOW_STYLE, WM_DESTROY, WM_PAINT, WM_TIMER, WNDCLASSW, WS_CHILD,
     WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_POPUP, WS_VISIBLE,
 };
@@ -49,9 +49,12 @@ pub fn create_window() -> Result<HWND> {
             None,       // no create param
         )?;
 
-        // A layered window is invisible until its attributes are set. Make it
-        // fully opaque; it then paints normally through WM_PAINT.
-        SetLayeredWindowAttributes(hwnd, COLORREF(0), 255, LWA_ALPHA)?;
+        // A layered window is invisible until its attributes are set. Use a
+        // color key of black (the class background fill): every black pixel
+        // becomes fully transparent so the taskbar shows through, while the
+        // painted text (white) stays opaque. This gives a transparent
+        // background instead of a solid black box.
+        SetLayeredWindowAttributes(hwnd, COLORREF(0x0000_0000), 0, LWA_COLORKEY)?;
 
         Ok(hwnd)
     }
