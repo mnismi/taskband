@@ -21,6 +21,19 @@ pub fn compute_x(
     (boundary_client - gap - width).max(0)
 }
 
+/// Pack module widths left-to-right with no extra gaps (each width already
+/// includes its own padding + margin). Returns each module's left offset within
+/// the bar and the total bar width.
+pub fn place_modules(widths: &[i32]) -> (Vec<i32>, i32) {
+    let mut offsets = Vec::with_capacity(widths.len());
+    let mut x = 0;
+    for &w in widths {
+        offsets.push(x);
+        x += w;
+    }
+    (offsets, x)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,5 +67,19 @@ mod tests {
         // secondary monitor: taskbar_left = 1920, obstacle at 3256
         // boundary_client = 3256 - 1920 = 1336 -> 1068
         assert_eq!(compute_x(1920, 1920, &[3256], 260, 8), 1068);
+    }
+
+    #[test]
+    fn places_modules_left_to_right() {
+        let (offsets, total) = place_modules(&[100, 60, 80]);
+        assert_eq!(offsets, vec![0, 100, 160]);
+        assert_eq!(total, 240);
+    }
+
+    #[test]
+    fn empty_bar_is_zero_width() {
+        let (offsets, total) = place_modules(&[]);
+        assert!(offsets.is_empty());
+        assert_eq!(total, 0);
     }
 }
