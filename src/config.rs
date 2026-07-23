@@ -38,6 +38,25 @@ pub fn load(path: &Path) -> Result<RawConfig, String> {
     parse(&text).map_err(|e| format!("parsing {}: {e}", path.display()))
 }
 
+/// Turn a parsed config into the per-module render styles and plugin specs, in
+/// `modules-right` order. A name in `modules-right` without a definition is
+/// skipped; a name listed more than once produces that module more than once.
+pub fn build(cfg: &RawConfig) -> (Vec<crate::css::Style>, Vec<crate::plugin::PluginSpec>) {
+    let mut styles = Vec::new();
+    let mut specs = Vec::new();
+    for name in &cfg.modules_right {
+        if let Some(m) = cfg.modules.get(name) {
+            styles.push(crate::css::resolve(&cfg.css, &m.css));
+            specs.push(crate::plugin::PluginSpec {
+                name: name.clone(),
+                exec: m.exec.clone(),
+                interval: std::time::Duration::from_secs(m.interval.max(1)),
+            });
+        }
+    }
+    (styles, specs)
+}
+
 /// Resolve the config path: `venter.json` next to the executable, else `venter.json`
 /// in the current working directory.
 pub fn config_path() -> PathBuf {
@@ -84,5 +103,33 @@ mod tests {
     #[test]
     fn rejects_invalid_json() {
         assert!(parse("{ not valid").is_err());
+    }
+
+    #[test]
+    fn build_orders_modules_and_repeats_duplicates() {
+        let cfg = parse(
+            r##"{
+                "modules-right": ["cpu", "clock", "cpu"],
+                "css": { "color": "#d0d0d0" },
+                "cpu": { "exec": "echo c", "interval": 2, "css": { "color": "#7fdbb0" } },
+                "clock": { "exec": "echo t" }
+            }"##,
+        )
+        .expect("valid config");
+
+        let (styles, specs) = build(&cfg);
+
+        // modules-right order, with the duplicate "cpu" rendered twice.
+        let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["cpu", "clock", "cpu"]);
+        assert_eq!(styles.len(), 3);
+
+        // clock inherits the default interval (5s); cpu overrides to 2s.
+        assert_eq!(specs[0].interval, std::time::Duration::from_secs(2));
+        assert_eq!(specs[1].interval, std::time::Duration::from_secs(5));
+
+        // cpu's css override wins; clock falls back to the top-level default.
+        assert_eq!(styles[0].color, crate::css::Color { r: 0x7f, g: 0xdb, b: 0xb0 });
+        assert_eq!(styles[1].color, crate::css::Color { r: 0xd0, g: 0xd0, b: 0xd0 });
     }
 }

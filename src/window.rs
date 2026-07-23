@@ -1,4 +1,6 @@
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
+use std::time::SystemTime;
 
 use windows::core::{w, PCWSTR, Result};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM};
@@ -34,11 +36,14 @@ pub struct State {
     offsets: Vec<i32>,
     total_width: i32,
     rx: Receiver<Update>,
+    path: PathBuf,
+    mtime: Option<SystemTime>,
 }
 
 impl State {
-    pub fn new(styles: Vec<Style>, rx: Receiver<Update>) -> Self {
+    pub fn new(styles: Vec<Style>, rx: Receiver<Update>, path: PathBuf) -> Self {
         let n = styles.len();
+        let mtime = file_mtime(&path);
         State {
             texts: vec![String::new(); n],
             widths: vec![0; n],
@@ -46,8 +51,51 @@ impl State {
             total_width: 0,
             styles,
             rx,
+            path,
+            mtime,
         }
     }
+}
+
+/// Last-modified time of a file, or None if it can't be read.
+fn file_mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+/// If the config file changed on disk since we last looked, re-parse it and
+/// apply the new styles/modules with a fresh worker thread. A config that fails
+/// to parse (e.g. saved mid-edit) is ignored, keeping the running config.
+/// Returns true if a reload was applied (the caller should relayout + repaint).
+unsafe fn maybe_reload(state: &mut State) -> bool {
+    let current = file_mtime(&state.path);
+    if current == state.mtime {
+        return false;
+    }
+    // Record the observed mtime regardless, so a persistently-broken file does
+    // not trigger a reload attempt on every tick.
+    state.mtime = current;
+
+    let cfg = match crate::config::load(&state.path) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            eprintln!("vEnter: reload skipped — {e}");
+            return false;
+        }
+    };
+
+    let (styles, specs) = crate::config::build(&cfg);
+    let n = styles.len();
+    // Spawn the new worker first; assigning its receiver drops the old one,
+    // which makes the old worker exit on its next send.
+    let rx = crate::plugin::spawn_worker(specs);
+    state.styles = styles;
+    state.texts = vec![String::new(); n];
+    state.widths = vec![0; n];
+    state.offsets = vec![0; n];
+    state.total_width = 0;
+    state.rx = rx;
+    println!("vEnter: reloaded config — {n} module(s).");
+    true
 }
 
 /// Build a GDI font from a resolved style. Caller must DeleteObject it.
@@ -291,7 +339,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let state_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut State;
                 if !state_ptr.is_null() {
                     let state = &mut *state_ptr;
-                    let mut changed = false;
+                    // A live config edit rebuilds styles/modules and counts as a change.
+                    let mut changed = maybe_reload(state);
                     while let Ok(update) = state.rx.try_recv() {
                         if update.index < state.texts.len()
                             && state.texts[update.index] != update.text
