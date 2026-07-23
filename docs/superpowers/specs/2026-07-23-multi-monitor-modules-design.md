@@ -118,10 +118,15 @@ list for the primary index.
 - **`WM_PAINT`** per bar: find its `Bar` (match `hwnd`), paint its subset from the
   shared `texts`/`styles` and its own `offsets`/`widths`. The existing multi-line /
   text-align paint code is reused verbatim per module.
-- **Reposition** already works on secondary taskbars — `layout::compute_x` has a
-  `handles_nonzero_taskbar_left` test, and the obstacle scan naturally parks left
-  of whatever the secondary taskbar shows (e.g. its corner clock), or at the far
-  right when there is nothing.
+- **Reposition** works on secondary taskbars — `layout::compute_x` already handles
+  a non-zero `taskbar_left` (`handles_nonzero_taskbar_left` test). One wrinkle
+  discovered in testing: the Windows 11 **secondary** taskbar clock is painted
+  inside the full-width XAML host and has **no child window** to detect as an
+  obstacle, so a bar would otherwise park over it. `compute_x` therefore takes a
+  `right_reserve` that caps the parking boundary at `taskbar_right − reserve` on
+  secondary taskbars; the reserve is configurable via `secondary-clock-reserve`
+  (default 100px, measured clock width ≈ 81px). The primary taskbar keeps
+  `reserve = 0` because its tray *is* a detectable obstacle window.
 
 ### Ownership
 
