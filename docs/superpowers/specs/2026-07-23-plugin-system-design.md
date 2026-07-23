@@ -84,9 +84,10 @@ taskbar window. Instead:
 This keeps rendering responsive and confines all cross-thread traffic to a
 one-way channel (no shared mutex).
 
-`exec` is run through the shell-less `Command` with arguments split on
-whitespace for v1 (a full shell-parse is deferred); the documented pattern is to
-invoke `powershell -NoProfile -c "..."` or `-File script.ps1` explicitly.
+`exec` is run through the system shell — `cmd /C <exec>` via
+`Command::new("cmd").raw_arg("/C ...")` — so quotes, pipes, and redirection in
+the command line work exactly as written (like waybar's `sh -c`). The child is
+spawned with `CREATE_NO_WINDOW` so no console window flashes on each tick.
 
 ## Styling model
 
@@ -188,7 +189,6 @@ Each increment produces a working, testable bar on its own.
   restart (`TaskbarCreated`).
 - Borders / border-radius, left/center module groups.
 - DPI scaling and secondary-monitor taskbars.
-- Full shell parsing of `exec` (whitespace split for v1).
 
 ## Risks
 
@@ -196,7 +196,7 @@ Each increment produces a working, testable bar on its own.
   own module's updates, not the UI.
 - **Color-key limitations:** no semi-transparent backgrounds and black reserved;
   acceptable for v1 and documented.
-- **`exec` whitespace-splitting** is crude; the documented `powershell -c "..."`
-  pattern works, and full shell parsing is a clean follow-up.
+- **Shell dependency:** commands run via `cmd /C`; this is intended (matches
+  waybar's `sh -c`) and lets users write normal command lines, pipes, and quotes.
 - **Text measurement vs. painting** must use the same font, or widths won't match
   the drawn glyphs — the layout and paint code share one font-construction path.
