@@ -111,12 +111,19 @@ pub fn build_registry(cfg: &RawConfig) -> BuildResult {
     let mut specs = Vec::new();
     let mut slot_of: HashMap<String, usize> = HashMap::new();
 
-    let mut monitors = HashMap::new();
+    // Resolve monitors in ascending index order so slot assignment is
+    // deterministic (a HashMap's iteration order is randomized per process).
+    let mut entries: Vec<(usize, &MonitorConfig)> = Vec::new();
     for (key, mc) in &cfg.monitors {
-        let Ok(index) = key.parse::<usize>() else {
-            eprintln!("vEnter: monitor key '{key}' is not a valid index (skipped)");
-            continue;
-        };
+        match key.parse::<usize>() {
+            Ok(index) => entries.push((index, mc)),
+            Err(_) => eprintln!("vEnter: monitor key '{key}' is not a valid index (skipped)"),
+        }
+    }
+    entries.sort_by_key(|(index, _)| *index);
+
+    let mut monitors = HashMap::new();
+    for (index, mc) in entries {
         let slots = resolve_list(&mc.modules_right, cfg, &mut styles, &mut specs, &mut slot_of);
         monitors.insert(index, slots);
     }
