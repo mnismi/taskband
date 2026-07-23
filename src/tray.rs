@@ -12,12 +12,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
 use windows::core::{w, Result, PCWSTR};
-use windows::Win32::Foundation::{
-    HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM, ERROR_SUCCESS,
-};
-use windows::Win32::UI::WindowsAndMessaging::{
-    GetSystemMetrics, LoadImageW, HICON, IMAGE_ICON, LR_DEFAULTCOLOR, SM_CXSMICON, SM_CYSMICON,
-};
+use windows::Win32::Foundation::{ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::Registry::{
     RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ,
 };
@@ -31,6 +26,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetForegroundWindow, SetWindowLongPtrW, TrackPopupMenu, GWLP_USERDATA, IDI_APPLICATION,
     MF_CHECKED, MF_SEPARATOR, MF_STRING, SW_SHOWNORMAL, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_APP,
     WM_CONTEXTMENU, WM_DESTROY, WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_EX_TOOLWINDOW, WS_OVERLAPPED,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetSystemMetrics, LoadImageW, HICON, IMAGE_ICON, LR_DEFAULTCOLOR, SM_CXSMICON, SM_CYSMICON,
 };
 
 /// Tray-icon callback message (icon -> our window).
@@ -156,7 +154,12 @@ unsafe fn show_menu(hwnd: HWND) {
     };
     let _ = AppendMenuW(menu, MF_STRING, ID_RELOAD, w!("Reload config"));
     let _ = AppendMenuW(menu, MF_STRING, ID_EDIT, w!("Edit config"));
-    let startup = MF_STRING | if startup_enabled() { MF_CHECKED } else { Default::default() };
+    let startup = MF_STRING
+        | if startup_enabled() {
+            MF_CHECKED
+        } else {
+            Default::default()
+        };
     let _ = AppendMenuW(menu, startup, ID_STARTUP, w!("Start at login"));
     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
     let _ = AppendMenuW(menu, MF_STRING, ID_QUIT, w!("Quit"));
@@ -179,7 +182,12 @@ unsafe fn show_menu(hwnd: HWND) {
 
     match cmd.0 as usize {
         ID_RELOAD => {
-            let _ = PostMessageW(state.driver, crate::window::WM_APP_RELOAD, WPARAM(0), LPARAM(0));
+            let _ = PostMessageW(
+                state.driver,
+                crate::window::WM_APP_RELOAD,
+                WPARAM(0),
+                LPARAM(0),
+            );
         }
         ID_EDIT => edit_config(hwnd, &state.path),
         ID_STARTUP => {
@@ -199,7 +207,11 @@ unsafe fn edit_config(hwnd: HWND, path: &Path) {
     if !path.exists() {
         let _ = std::fs::write(path, crate::config::DEFAULT_CONFIG);
     }
-    let file: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let file: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
     ShellExecuteW(
         hwnd,
         w!("open"),
@@ -232,8 +244,7 @@ pub fn set_startup(enable: bool) -> bool {
         if enable {
             let exe = std::env::current_exe().unwrap_or_default();
             let quoted = format!("\"{}\"", exe.display());
-            let data: Vec<u16> =
-                quoted.encode_utf16().chain(std::iter::once(0)).collect();
+            let data: Vec<u16> = quoted.encode_utf16().chain(std::iter::once(0)).collect();
             let cb = (data.len() * 2) as u32;
             RegSetKeyValueW(
                 HKEY_CURRENT_USER,

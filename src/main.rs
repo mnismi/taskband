@@ -54,7 +54,14 @@ fn main() -> windows::core::Result<()> {
         if m.primary {
             driver = Some(hwnd);
         }
-        bars.push(window::Bar::new(hwnd, taskbar, m.index, m.primary, slots, build.clock_reserve));
+        bars.push(window::Bar::new(
+            hwnd,
+            taskbar,
+            m.index,
+            m.primary,
+            slots,
+            build.clock_reserve,
+        ));
     }
 
     if bars.is_empty() {

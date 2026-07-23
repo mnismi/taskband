@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::SystemTime;
 
-use windows::core::{w, PCWSTR, Result};
+use windows::core::{w, Result, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, GetDC,
@@ -135,8 +135,12 @@ unsafe fn maybe_reload(app: &mut App) -> bool {
     app.texts = vec![String::new(); n];
     app.rx = rx;
     for bar in &mut app.bars {
-        let slots =
-            crate::config::slots_for_monitor(&build.monitors, &build.legacy, bar.monitor_index, bar.primary);
+        let slots = crate::config::slots_for_monitor(
+            &build.monitors,
+            &build.legacy,
+            bar.monitor_index,
+            bar.primary,
+        );
         let m = slots.len();
         bar.modules = slots;
         bar.widths = vec![0; m];
@@ -191,7 +195,12 @@ unsafe fn measure(hdc: HDC, style: &Style, text: &str) -> i32 {
         }
         let mut utf16: Vec<u16> = line.encode_utf16().collect();
         let mut r = RECT::default();
-        DrawTextW(hdc, &mut utf16, &mut r, DT_CALCRECT | DT_SINGLELINE | DT_LEFT);
+        DrawTextW(
+            hdc,
+            &mut utf16,
+            &mut r,
+            DT_CALCRECT | DT_SINGLELINE | DT_LEFT,
+        );
         text_w = text_w.max(r.right - r.left);
     }
     SelectObject(hdc, old);
@@ -360,7 +369,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
 
                             let left = x0 + style.margin.left;
                             let right = x0 + w - style.margin.right;
-                            let mrect = RECT { left, top: 0, right, bottom: height };
+                            let mrect = RECT {
+                                left,
+                                top: 0,
+                                right,
+                                bottom: height,
+                            };
 
                             let bg = match style.background {
                                 Some(c) => c.colorref(),
@@ -418,15 +432,24 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let reloaded = maybe_reload(app);
                     let mut changed = vec![false; app.texts.len()];
                     while let Ok(update) = app.rx.try_recv() {
-                        if update.index < app.texts.len() && app.texts[update.index] != update.text {
+                        if update.index < app.texts.len() && app.texts[update.index] != update.text
+                        {
                             app.texts[update.index] = update.text;
                             changed[update.index] = true;
                         }
                     }
-                    let App { texts, styles, bars, .. } = app;
+                    let App {
+                        texts,
+                        styles,
+                        bars,
+                        ..
+                    } = app;
                     for bar in bars.iter_mut() {
                         let affected = reloaded
-                            || bar.modules.iter().any(|&s| changed.get(s).copied().unwrap_or(false));
+                            || bar
+                                .modules
+                                .iter()
+                                .any(|&s| changed.get(s).copied().unwrap_or(false));
                         if affected {
                             relayout_bar(bar, texts.as_slice(), styles.as_slice());
                         }

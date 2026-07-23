@@ -86,6 +86,9 @@ mod tests {
 
     #[test]
     fn not_due_before_interval() {
-        assert!(!is_due(Some(Duration::from_millis(500)), Duration::from_secs(2)));
+        assert!(!is_due(
+            Some(Duration::from_millis(500)),
+            Duration::from_secs(2)
+        ));
     }
 }

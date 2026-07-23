@@ -136,7 +136,13 @@ pub fn build_registry(cfg: &RawConfig) -> BuildResult {
     }
 
     let legacy = if cfg.monitors.is_empty() {
-        resolve_list(&cfg.module_order, cfg, &mut styles, &mut specs, &mut slot_of)
+        resolve_list(
+            &cfg.module_order,
+            cfg,
+            &mut styles,
+            &mut specs,
+            &mut slot_of,
+        )
     } else {
         if !cfg.module_order.is_empty() {
             eprintln!("Winbar: 'monitors' is set; top-level 'modules' is ignored");
@@ -144,7 +150,13 @@ pub fn build_registry(cfg: &RawConfig) -> BuildResult {
         Vec::new()
     };
 
-    BuildResult { styles, specs, monitors, legacy, clock_reserve: cfg.secondary_clock_reserve }
+    BuildResult {
+        styles,
+        specs,
+        monitors,
+        legacy,
+        clock_reserve: cfg.secondary_clock_reserve,
+    }
 }
 
 /// The slot list a monitor should display: its `monitors` entry when the map is
@@ -202,7 +214,10 @@ mod tests {
         )
         .expect("valid config");
 
-        assert_eq!(cfg.module_order, vec!["cpu".to_string(), "clock".to_string()]);
+        assert_eq!(
+            cfg.module_order,
+            vec!["cpu".to_string(), "clock".to_string()]
+        );
         assert_eq!(cfg.css.get("color").map(String::as_str), Some("#ffffff"));
 
         let cpu = cfg.modules.get("cpu").expect("cpu module");
@@ -234,7 +249,10 @@ mod tests {
         )
         .expect("valid config");
 
-        assert_eq!(cfg.monitors.get("0").unwrap().module_order, vec!["cpu".to_string()]);
+        assert_eq!(
+            cfg.monitors.get("0").unwrap().module_order,
+            vec!["cpu".to_string()]
+        );
         assert_eq!(
             cfg.monitors.get("1").unwrap().module_order,
             vec!["clock".to_string(), "net".to_string()]
@@ -305,10 +323,8 @@ mod tests {
         let def = parse(r##"{ "cpu": { "exec": "echo c" } }"##).expect("valid");
         assert_eq!(build_registry(&def).clock_reserve, 100);
 
-        let over = parse(
-            r##"{ "secondary-clock-reserve": 140, "cpu": { "exec": "echo c" } }"##,
-        )
-        .expect("valid");
+        let over = parse(r##"{ "secondary-clock-reserve": 140, "cpu": { "exec": "echo c" } }"##)
+            .expect("valid");
         assert_eq!(build_registry(&over).clock_reserve, 140);
     }
 
@@ -320,11 +336,17 @@ mod tests {
 
         // map present: listed monitor uses its entry; unlisted monitor -> empty
         assert_eq!(slots_for_monitor(&monitors, &legacy, 0, true), vec![0, 1]);
-        assert_eq!(slots_for_monitor(&monitors, &legacy, 5, false), Vec::<usize>::new());
+        assert_eq!(
+            slots_for_monitor(&monitors, &legacy, 5, false),
+            Vec::<usize>::new()
+        );
 
         // map empty: primary uses legacy, non-primary -> empty
         let empty: HashMap<usize, Vec<usize>> = HashMap::new();
         assert_eq!(slots_for_monitor(&empty, &legacy, 3, true), vec![2]);
-        assert_eq!(slots_for_monitor(&empty, &legacy, 3, false), Vec::<usize>::new());
+        assert_eq!(
+            slots_for_monitor(&empty, &legacy, 3, false),
+            Vec::<usize>::new()
+        );
     }
 }

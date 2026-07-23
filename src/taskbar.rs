@@ -26,9 +26,17 @@ pub fn find_taskbar() -> Result<HWND> {
 }
 
 /// `EnumDisplayMonitors` callback: push one `MonitorInfo` per monitor.
-unsafe extern "system" fn enum_proc(hmon: HMONITOR, _hdc: HDC, _rc: *mut RECT, data: LPARAM) -> BOOL {
+unsafe extern "system" fn enum_proc(
+    hmon: HMONITOR,
+    _hdc: HDC,
+    _rc: *mut RECT,
+    data: LPARAM,
+) -> BOOL {
     let monitors = &mut *(data.0 as *mut Vec<MonitorInfo>);
-    let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+    let mut mi = MONITORINFO {
+        cbSize: size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
     if GetMonitorInfoW(hmon, &mut mi).as_bool() {
         let index = monitors.len();
         monitors.push(MonitorInfo {
@@ -108,7 +116,11 @@ pub fn monitor_log_line(m: &MonitorInfo) -> String {
         h,
         m.rect.left,
         m.rect.top,
-        if m.primary { "   primary" } else { "          " },
+        if m.primary {
+            "   primary"
+        } else {
+            "          "
+        },
         if m.taskbar.is_some() { "yes" } else { "no" },
     )
 }
@@ -122,27 +134,42 @@ mod tests {
     #[test]
     fn find_taskbar_returns_a_handle() {
         let hwnd = find_taskbar().expect("Shell_TrayWnd should exist while explorer is running");
-        assert_ne!(hwnd, HWND::default(), "taskbar handle should not be the null handle");
+        assert_ne!(
+            hwnd,
+            HWND::default(),
+            "taskbar handle should not be the null handle"
+        );
     }
 
     #[test]
     fn detects_exactly_one_primary_with_a_taskbar() {
         let monitors = detect();
-        assert!(!monitors.is_empty(), "at least one monitor should be detected");
+        assert!(
+            !monitors.is_empty(),
+            "at least one monitor should be detected"
+        );
         assert_eq!(
             monitors.iter().filter(|m| m.primary).count(),
             1,
             "exactly one primary monitor"
         );
         let primary = monitors.iter().find(|m| m.primary).unwrap();
-        assert!(primary.taskbar.is_some(), "the primary monitor has the Shell_TrayWnd taskbar");
+        assert!(
+            primary.taskbar.is_some(),
+            "the primary monitor has the Shell_TrayWnd taskbar"
+        );
     }
 
     #[test]
     fn monitor_log_line_formats_index_size_and_taskbar() {
         let m = MonitorInfo {
             index: 1,
-            rect: RECT { left: 1920, top: 0, right: 3840, bottom: 1080 },
+            rect: RECT {
+                left: 1920,
+                top: 0,
+                right: 3840,
+                bottom: 1080,
+            },
             primary: false,
             hmonitor: HMONITOR::default(),
             taskbar: None,
