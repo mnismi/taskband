@@ -8,6 +8,9 @@ pub struct RawConfig {
     pub module_order: Vec<String>,
     #[serde(default)]
     pub css: HashMap<String, String>,
+    /// Shared named style fragments, available to every module.
+    #[serde(default)]
+    pub classes: crate::css::ClassMap,
     /// Pixels reserved at the right edge of each secondary taskbar for the
     /// Windows 11 clock (which is painted in the XAML host and has no obstacle
     /// window to detect). Ignored on the primary taskbar.
@@ -34,10 +37,20 @@ pub struct ModuleConfig {
     pub interval: u64,
     #[serde(default)]
     pub css: HashMap<String, String>,
+    /// Module-only named style fragments, overlaid on the shared `classes`.
+    #[serde(default)]
+    pub classes: crate::css::ClassMap,
+    /// "text" (default) or "html". Anything else warns and falls back to text.
+    #[serde(default = "default_output")]
+    pub output: String,
 }
 
 fn default_interval() -> u64 {
     5
+}
+
+fn default_output() -> String {
+    "text".to_string()
 }
 
 /// The default config, baked into the binary so a lone `.exe` runs with no
@@ -69,6 +82,7 @@ pub fn load(path: &Path) -> Result<RawConfig, String> {
 /// plus each monitor's ordered slot list and the legacy (primary-only) list.
 pub struct BuildResult {
     pub styles: Vec<crate::css::Style>,
+    pub class_maps: Vec<crate::css::ClassMap>,
     pub specs: Vec<crate::plugin::PluginSpec>,
     pub monitors: HashMap<usize, Vec<usize>>,
     pub legacy: Vec<usize>,
@@ -83,6 +97,7 @@ fn resolve_list(
     names: &[String],
     cfg: &RawConfig,
     styles: &mut Vec<crate::css::Style>,
+    class_maps: &mut Vec<crate::css::ClassMap>,
     specs: &mut Vec<crate::plugin::PluginSpec>,
     slot_of: &mut HashMap<String, usize>,
 ) -> Vec<usize> {
@@ -96,10 +111,22 @@ fn resolve_list(
             Some(m) => {
                 let slot = styles.len();
                 styles.push(crate::css::resolve(&cfg.css, &m.css));
+                class_maps.push(crate::css::merge_class_maps(&cfg.classes, &m.classes));
+                let output = match m.output.as_str() {
+                    "text" => crate::plugin::OutputMode::Text,
+                    "html" => crate::plugin::OutputMode::Html,
+                    other => {
+                        eprintln!(
+                            "Taskband: module '{name}': unknown output '{other}' (using text)"
+                        );
+                        crate::plugin::OutputMode::Text
+                    }
+                };
                 specs.push(crate::plugin::PluginSpec {
                     name: name.clone(),
                     exec: m.exec.clone(),
                     interval: std::time::Duration::from_secs(m.interval.max(1)),
+                    output,
                 });
                 slot_of.insert(name.clone(), slot);
                 slots.push(slot);
@@ -115,6 +142,7 @@ fn resolve_list(
 /// otherwise `legacy` holds the top-level `modules` slots for the primary.
 pub fn build_registry(cfg: &RawConfig) -> BuildResult {
     let mut styles = Vec::new();
+    let mut class_maps = Vec::new();
     let mut specs = Vec::new();
     let mut slot_of: HashMap<String, usize> = HashMap::new();
 
@@ -131,7 +159,14 @@ pub fn build_registry(cfg: &RawConfig) -> BuildResult {
 
     let mut monitors = HashMap::new();
     for (index, mc) in entries {
-        let slots = resolve_list(&mc.module_order, cfg, &mut styles, &mut specs, &mut slot_of);
+        let slots = resolve_list(
+            &mc.module_order,
+            cfg,
+            &mut styles,
+            &mut class_maps,
+            &mut specs,
+            &mut slot_of,
+        );
         monitors.insert(index, slots);
     }
 
@@ -140,6 +175,7 @@ pub fn build_registry(cfg: &RawConfig) -> BuildResult {
             &cfg.module_order,
             cfg,
             &mut styles,
+            &mut class_maps,
             &mut specs,
             &mut slot_of,
         )
@@ -152,6 +188,7 @@ pub fn build_registry(cfg: &RawConfig) -> BuildResult {
 
     BuildResult {
         styles,
+        class_maps,
         specs,
         monitors,
         legacy,
@@ -232,6 +269,76 @@ mod tests {
     #[test]
     fn rejects_invalid_json() {
         assert!(parse("{ not valid").is_err());
+    }
+
+    #[test]
+    fn parses_classes_at_both_levels_and_output_flag() {
+        let cfg = parse(
+            r##"{
+                "modules": ["mem"],
+                "classes": { "critical": { "color": "#ff5555" } },
+                "mem": {
+                    "exec": "echo m",
+                    "output": "html",
+                    "classes": { "critical": { "font-weight": "bold" } }
+                }
+            }"##,
+        )
+        .expect("valid config");
+
+        assert_eq!(
+            cfg.classes
+                .get("critical")
+                .unwrap()
+                .get("color")
+                .map(String::as_str),
+            Some("#ff5555")
+        );
+        let mem = cfg.modules.get("mem").unwrap();
+        assert_eq!(mem.output, "html");
+        assert!(mem.classes.contains_key("critical"));
+    }
+
+    #[test]
+    fn output_defaults_to_text() {
+        let cfg = parse(r##"{ "cpu": { "exec": "echo c" } }"##).expect("valid");
+        assert_eq!(cfg.modules.get("cpu").unwrap().output, "text");
+    }
+
+    #[test]
+    fn build_registry_merges_class_maps_and_resolves_output() {
+        let cfg = parse(
+            r##"{
+                "modules": ["mem", "cpu"],
+                "classes": { "critical": { "color": "#ff5555" } },
+                "mem": {
+                    "exec": "echo m",
+                    "output": "html",
+                    "classes": { "critical": { "font-weight": "bold" } }
+                },
+                "cpu": { "exec": "echo c" }
+            }"##,
+        )
+        .expect("valid config");
+
+        let b = build_registry(&cfg);
+        assert_eq!(b.class_maps.len(), 2);
+        // mem: merged fragment has both properties
+        let crit = b.class_maps[0].get("critical").unwrap();
+        assert_eq!(crit.get("color").map(String::as_str), Some("#ff5555"));
+        assert_eq!(crit.get("font-weight").map(String::as_str), Some("bold"));
+        // cpu: inherits the shared class untouched
+        assert!(b.class_maps[1].contains_key("critical"));
+        assert_eq!(b.specs[0].output, crate::plugin::OutputMode::Html);
+        assert_eq!(b.specs[1].output, crate::plugin::OutputMode::Text);
+    }
+
+    #[test]
+    fn unknown_output_warns_and_falls_back_to_text() {
+        let cfg = parse(r##"{ "modules": ["x"], "x": { "exec": "echo x", "output": "yaml" } }"##)
+            .expect("valid config");
+        let b = build_registry(&cfg);
+        assert_eq!(b.specs[0].output, crate::plugin::OutputMode::Text);
     }
 
     #[test]

@@ -25,7 +25,8 @@ on Windows, this is for you.
   `interval`; its output is rendered on the bar, multi-line output included
 - **Per-monitor routing**: send different modules to different monitors
 - **CSS-like styling**: global defaults plus per-module overrides for color,
-  background, font, padding, margin, and text alignment
+  background, font, padding, margin, and text alignment; named classes let a
+  module restyle itself, or parts of a line, based on what it reports
 - **JSON5 config with live reload**: comments and trailing commas allowed;
   edits apply instantly, no restart
 - **System tray**: reload config, edit config, toggle start-at-login, quit
@@ -98,6 +99,8 @@ are fine:
 | `exec`     | string | (required) | Command to run; stdout becomes the module text |
 | `interval` | number | `5`     | Seconds between runs                           |
 | `css`      | object | `{}`    | Style overrides for this module                |
+| `output`   | string | `"text"` | `"html"` enables span markup in stdout (see Dynamic styles) |
+| `classes`  | object | `{}`    | Module-only named style fragments              |
 
 ### Styling
 
@@ -106,6 +109,49 @@ Supported CSS properties, in the global `css` block or per module:
 `color`, `background-color`, `font-family`, `font-size` (px),
 `font-weight` (`normal`, `bold`, or a number), `padding`, `margin`
 (1-4 edge values, px), `text-align` (`left`, `center`, `right`).
+
+### Dynamic styles
+
+A module can change its look based on what it reports. Define named classes,
+opt the module into HTML output, and let the script wrap parts of its output
+in spans that reference them:
+
+```json5
+{
+    // Shared classes, available to every module.
+    "classes": {
+        "warning":  { "color": "#f5c542" },
+        "critical": { "color": "#ff5555", "font-weight": "bold" }
+    },
+    "memory": {
+        "exec": "powershell ... memory.ps1",
+        "output": "html",
+        // Module-only classes; a name defined in both places merges,
+        // property by property, and the module's keys win.
+        "classes": { "title": { "font-weight": "bold" } }
+    }
+}
+```
+
+With `"output": "html"`, the module prints its text with markup inline, and
+the tags never appear on the bar:
+
+```
+<span class='title'>MEM </span><span class='warning'>76%</span> used
+```
+
+Only the `span` tag with a `class` attribute is recognized. Spans nest, and
+classes accumulate outer to inner. Each output line is a line on the bar,
+exactly like plain text. Escape literal characters as `&lt;`, `&gt;`,
+`&amp;`, `&quot;`, `&apos;`. Span classes may only change text-level
+properties: `color`, `background-color`, `font-family`, `font-size`, and
+`font-weight`. Box properties (`padding`, `margin`, `text-align`) stay
+module-level and are ignored in a span with a warning.
+
+Malformed markup is shown as plain text with a warning on stderr, so a
+broken module stays visible. Plain-text modules (no `output` key) are never
+parsed: their angle brackets and ampersands display literally, and they keep
+working unchanged.
 
 ### Multiple monitors
 

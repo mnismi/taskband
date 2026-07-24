@@ -5,6 +5,7 @@
 mod config;
 mod css;
 mod layout;
+mod markup;
 mod plugin;
 mod taskbar;
 mod tray;
@@ -71,7 +72,7 @@ fn main() -> windows::core::Result<()> {
     let driver = driver.unwrap_or_else(|| bars[0].hwnd());
     let bar_count = bars.len();
 
-    let app = window::App::new(build.styles, rx, path.clone(), bars);
+    let app = window::App::new(build.styles, build.class_maps, rx, path.clone(), bars);
     window::install(app, driver);
     tray::install(instance, driver, path)?;
     println!(

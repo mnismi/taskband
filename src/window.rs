@@ -3,13 +3,14 @@ use std::sync::mpsc::Receiver;
 use std::time::SystemTime;
 
 use windows::core::{w, Result, PCWSTR};
-use windows::Win32::Foundation::{COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, TRUE, WPARAM};
+use windows::Win32::Foundation::{
+    COLORREF, HINSTANCE, HWND, LPARAM, LRESULT, RECT, SIZE, TRUE, WPARAM,
+};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, DrawTextW, EndPaint, FillRect, GetDC,
-    GetTextMetricsW, InvalidateRect, ReleaseDC, SelectObject, SetBkMode, SetTextColor,
-    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DEFAULT_QUALITY, DRAW_TEXT_FORMAT,
-    DT_CALCRECT, DT_CENTER, DT_LEFT, DT_RIGHT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, HDC, HFONT,
-    OUT_DEFAULT_PRECIS, PAINTSTRUCT, TEXTMETRICW, TRANSPARENT,
+    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, EndPaint, FillRect, GetDC,
+    GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC, SelectObject, SetBkMode,
+    SetTextColor, TextOutW, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DEFAULT_QUALITY,
+    FF_DONTCARE, HDC, HFONT, OUT_DEFAULT_PRECIS, PAINTSTRUCT, TEXTMETRICW, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -21,7 +22,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_TIMER, WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_LAYERED, WS_POPUP, WS_VISIBLE,
 };
 
-use crate::css::{Style, TextAlign};
+use crate::css::{ClassMap, Run, Style, TextAlign};
 use crate::plugin::Update;
 
 const TIMER_ID: usize = 1;
@@ -78,11 +79,18 @@ impl Bar {
     }
 }
 
-/// Shared UI-thread render state: per-slot texts/styles plus every monitor's bar.
-/// Only the UI thread touches it; the worker thread only sends `Update`s.
+/// Shared UI-thread render state: per-slot output and resolved runs plus every
+/// monitor's bar. Only the UI thread touches it; the worker only sends Updates.
 pub struct App {
-    texts: Vec<String>,
+    /// Per-slot style from config (default css + module css): box, background,
+    /// blank-line font, and the base every span class layers onto.
     styles: Vec<Style>,
+    /// Per-slot merged class definitions (shared `classes` + module `classes`).
+    class_maps: Vec<ClassMap>,
+    /// Last interpreted lines per slot, compared for change detection.
+    raw: Vec<Vec<crate::markup::Line>>,
+    /// Per-slot render-ready runs. Derived from `raw`, cached for paint.
+    runs: Vec<Vec<Vec<Run>>>,
     rx: Receiver<Update>,
     path: PathBuf,
     mtime: Option<SystemTime>,
@@ -90,11 +98,20 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(styles: Vec<Style>, rx: Receiver<Update>, path: PathBuf, bars: Vec<Bar>) -> Self {
+    pub fn new(
+        styles: Vec<Style>,
+        class_maps: Vec<ClassMap>,
+        rx: Receiver<Update>,
+        path: PathBuf,
+        bars: Vec<Bar>,
+    ) -> Self {
+        let n = styles.len();
         let mtime = file_mtime(&path);
         App {
-            texts: vec![String::new(); styles.len()],
             styles,
+            class_maps,
+            raw: vec![Vec::new(); n],
+            runs: vec![Vec::new(); n],
             rx,
             path,
             mtime,
@@ -132,7 +149,9 @@ unsafe fn maybe_reload(app: &mut App) -> bool {
     // which makes the old worker exit on its next send.
     let rx = crate::plugin::spawn_worker(build.specs);
     app.styles = build.styles;
-    app.texts = vec![String::new(); n];
+    app.class_maps = build.class_maps;
+    app.raw = vec![Vec::new(); n];
+    app.runs = vec![Vec::new(); n];
     app.rx = rx;
     for bar in &mut app.bars {
         let slots = crate::config::slots_for_monitor(
@@ -174,46 +193,71 @@ unsafe fn make_font(style: &Style) -> HFONT {
     )
 }
 
-/// The DrawTextW horizontal-alignment flag for a resolved text alignment.
-fn align_flag(align: TextAlign) -> DRAW_TEXT_FORMAT {
-    match align {
-        TextAlign::Left => DT_LEFT,
-        TextAlign::Center => DT_CENTER,
-        TextAlign::Right => DT_RIGHT,
+/// Width, height, and ascent of one run under its own font.
+struct RunMetrics {
+    width: i32,
+    height: i32,
+    ascent: i32,
+}
+
+unsafe fn run_metrics(hdc: HDC, run: &Run) -> RunMetrics {
+    let font = make_font(&run.style);
+    let old = SelectObject(hdc, font);
+    let mut tm = TEXTMETRICW::default();
+    let (height, ascent) = if GetTextMetricsW(hdc, &mut tm).as_bool() {
+        (tm.tmHeight + tm.tmExternalLeading, tm.tmAscent)
+    } else {
+        (run.style.font_size, run.style.font_size)
+    };
+    let width = if run.text.is_empty() {
+        0
+    } else {
+        let utf16: Vec<u16> = run.text.encode_utf16().collect();
+        let mut size = SIZE::default();
+        let _ = GetTextExtentPoint32W(hdc, &utf16, &mut size);
+        size.cx
+    };
+    SelectObject(hdc, old);
+    let _ = DeleteObject(font);
+    RunMetrics {
+        width,
+        height,
+        ascent,
     }
 }
 
-/// Measure a module's full width: widest line's extent + horizontal padding +
-/// margin. For multi-line text the module is as wide as its longest line.
-unsafe fn measure(hdc: HDC, style: &Style, text: &str) -> i32 {
+/// Line height and ascent for a blank line, from the module's base font.
+unsafe fn blank_line_metrics(hdc: HDC, style: &Style) -> (i32, i32) {
     let font = make_font(style);
     let old = SelectObject(hdc, font);
-    let mut text_w = 0;
-    for line in text.lines() {
-        if line.is_empty() {
-            continue;
-        }
-        let mut utf16: Vec<u16> = line.encode_utf16().collect();
-        let mut r = RECT::default();
-        DrawTextW(
-            hdc,
-            &mut utf16,
-            &mut r,
-            DT_CALCRECT | DT_SINGLELINE | DT_LEFT,
-        );
-        text_w = text_w.max(r.right - r.left);
-    }
+    let mut tm = TEXTMETRICW::default();
+    let hm = if GetTextMetricsW(hdc, &mut tm).as_bool() {
+        (tm.tmHeight + tm.tmExternalLeading, tm.tmAscent)
+    } else {
+        (style.font_size, style.font_size)
+    };
     SelectObject(hdc, old);
     let _ = DeleteObject(font);
+    hm
+}
+
+/// Measure a module's full width: widest line (sum of its runs' extents) +
+/// horizontal padding + margin.
+unsafe fn measure(hdc: HDC, style: &Style, lines: &[Vec<Run>]) -> i32 {
+    let mut text_w = 0;
+    for line in lines {
+        let w: i32 = line.iter().map(|r| run_metrics(hdc, r).width).sum();
+        text_w = text_w.max(w);
+    }
     text_w + style.padding.left + style.padding.right + style.margin.left + style.margin.right
 }
 
-/// Re-measure one bar's modules against current text and recompute its layout.
-unsafe fn relayout_bar(bar: &mut Bar, texts: &[String], styles: &[Style]) {
+/// Re-measure one bar's modules against current runs and recompute its layout.
+unsafe fn relayout_bar(bar: &mut Bar, styles: &[Style], runs: &[Vec<Vec<Run>>]) {
     let hdc = GetDC(bar.hwnd);
     bar.widths.clear();
     for &slot in &bar.modules {
-        bar.widths.push(measure(hdc, &styles[slot], &texts[slot]));
+        bar.widths.push(measure(hdc, &styles[slot], &runs[slot]));
     }
     ReleaseDC(bar.hwnd, hdc);
     let (offsets, total) = crate::layout::place_modules(&bar.widths);
@@ -384,39 +428,62 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             FillRect(hdc, &mrect, brush);
                             let _ = DeleteObject(brush);
 
-                            let font = make_font(style);
-                            let old = SelectObject(hdc, font);
-                            SetBkMode(hdc, TRANSPARENT);
-                            SetTextColor(hdc, COLORREF(style.color.colorref()));
-
-                            let mut tm = TEXTMETRICW::default();
-                            let line_h = if GetTextMetricsW(hdc, &mut tm).as_bool() {
-                                tm.tmHeight + tm.tmExternalLeading
-                            } else {
-                                style.font_size
-                            };
-
                             let text_left = left + style.padding.left;
                             let text_right = right - style.padding.right;
-                            let lines: Vec<&str> = app.texts[slot].lines().collect();
-                            let block_h = line_h * lines.len() as i32;
-                            let mut y = ((height - block_h) / 2).max(0);
-                            let flags = align_flag(style.text_align) | DT_VCENTER | DT_SINGLELINE;
+
+                            // Measure every run up front so the block can be
+                            // vertically centered before any drawing.
+                            let lines = &app.runs[slot];
+                            let blank = blank_line_metrics(hdc, style);
+                            let mut metrics: Vec<Vec<RunMetrics>> = Vec::with_capacity(lines.len());
+                            let mut line_dims: Vec<(i32, i32)> = Vec::with_capacity(lines.len());
                             for line in lines {
-                                if !line.is_empty() {
-                                    let mut lrect = RECT {
-                                        left: text_left,
-                                        top: y,
-                                        right: text_right,
-                                        bottom: y + line_h,
-                                    };
-                                    let mut utf16: Vec<u16> = line.encode_utf16().collect();
-                                    DrawTextW(hdc, &mut utf16, &mut lrect, flags);
+                                let ms: Vec<RunMetrics> =
+                                    line.iter().map(|r| run_metrics(hdc, r)).collect();
+                                let line_h = ms.iter().map(|m| m.height).max().unwrap_or(blank.0);
+                                let ascent = ms.iter().map(|m| m.ascent).max().unwrap_or(blank.1);
+                                metrics.push(ms);
+                                line_dims.push((line_h, ascent));
+                            }
+                            let block_h: i32 = line_dims.iter().map(|(h, _)| h).sum();
+                            let mut y = ((height - block_h) / 2).max(0);
+
+                            SetBkMode(hdc, TRANSPARENT);
+                            for (line, (ms, &(line_h, ascent))) in
+                                lines.iter().zip(metrics.iter().zip(line_dims.iter()))
+                            {
+                                let line_w: i32 = ms.iter().map(|m| m.width).sum();
+                                let avail = text_right - text_left;
+                                let mut x = match style.text_align {
+                                    TextAlign::Left => text_left,
+                                    TextAlign::Center => text_left + ((avail - line_w) / 2).max(0),
+                                    TextAlign::Right => (text_right - line_w).max(text_left),
+                                };
+                                // Runs share a baseline so mixed font sizes align.
+                                let baseline = y + ascent;
+                                for (run, m) in line.iter().zip(ms) {
+                                    if let Some(c) = run.style.background {
+                                        let rrect = RECT {
+                                            left: x,
+                                            top: y,
+                                            right: x + m.width,
+                                            bottom: y + line_h,
+                                        };
+                                        let b = CreateSolidBrush(COLORREF(c.colorref()));
+                                        FillRect(hdc, &rrect, b);
+                                        let _ = DeleteObject(b);
+                                    }
+                                    let font = make_font(&run.style);
+                                    let old = SelectObject(hdc, font);
+                                    SetTextColor(hdc, COLORREF(run.style.color.colorref()));
+                                    let utf16: Vec<u16> = run.text.encode_utf16().collect();
+                                    let _ = TextOutW(hdc, x, baseline - m.ascent, &utf16);
+                                    SelectObject(hdc, old);
+                                    let _ = DeleteObject(font);
+                                    x += m.width;
                                 }
                                 y += line_h;
                             }
-                            SelectObject(hdc, old);
-                            let _ = DeleteObject(font);
                         }
                     }
                 }
@@ -428,21 +495,25 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let app_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut App;
                 if !app_ptr.is_null() {
                     let app = &mut *app_ptr;
-                    // Reload first, so `changed` is sized to the current texts.
+                    // Reload first, so `changed` is sized to the current slots.
                     let reloaded = maybe_reload(app);
-                    let mut changed = vec![false; app.texts.len()];
+                    let mut changed = vec![false; app.raw.len()];
                     while let Ok(update) = app.rx.try_recv() {
-                        if update.index < app.texts.len() && app.texts[update.index] != update.text
-                        {
-                            app.texts[update.index] = update.text;
+                        if update.index >= app.raw.len() {
+                            continue;
+                        }
+                        if app.raw[update.index] != update.lines {
+                            app.runs[update.index] = crate::css::resolve_runs(
+                                &app.styles[update.index],
+                                &app.class_maps[update.index],
+                                &update.lines,
+                            );
+                            app.raw[update.index] = update.lines;
                             changed[update.index] = true;
                         }
                     }
                     let App {
-                        texts,
-                        styles,
-                        bars,
-                        ..
+                        styles, runs, bars, ..
                     } = app;
                     for bar in bars.iter_mut() {
                         let affected = reloaded
@@ -451,7 +522,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                                 .iter()
                                 .any(|&s| changed.get(s).copied().unwrap_or(false));
                         if affected {
-                            relayout_bar(bar, texts.as_slice(), styles.as_slice());
+                            relayout_bar(bar, styles.as_slice(), runs.as_slice());
                         }
                         reposition(bar);
                         if affected {

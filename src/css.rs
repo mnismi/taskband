@@ -61,6 +61,84 @@ impl Default for Style {
     }
 }
 
+/// Named style fragments: class name to css property map.
+pub type ClassMap = HashMap<String, HashMap<String, String>>;
+
+/// Overlay `module` onto `top`, class by class and property by property.
+/// Module keys win. Computed once per module slot at config load.
+pub fn merge_class_maps(top: &ClassMap, module: &ClassMap) -> ClassMap {
+    let mut out = top.clone();
+    for (name, frag) in module {
+        out.entry(name.clone())
+            .or_default()
+            .extend(frag.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+    out
+}
+
+/// Properties a span-applied class may set. Everything else describes the
+/// module's box (padding, margin, alignment) and is ignored in a span context.
+const SPAN_PROPS: [&str; 5] = [
+    "color",
+    "background-color",
+    "font-family",
+    "font-size",
+    "font-weight",
+];
+
+/// Layer `classes` (in order, later wins) from `map` over `base`. Only
+/// text-level properties apply, the rest warn and are ignored. Unknown class
+/// names warn and are skipped.
+pub fn with_span_classes(base: &Style, map: &ClassMap, classes: &[String]) -> Style {
+    let mut style = base.clone();
+    for name in classes {
+        match map.get(name) {
+            Some(frag) => {
+                let allowed: HashMap<String, String> = frag
+                    .iter()
+                    .filter(|(k, _)| {
+                        let ok = SPAN_PROPS.contains(&k.as_str());
+                        if !ok {
+                            eprintln!(
+                                "Taskband: css '{k}' is module-level; ignored in span class '{name}'"
+                            );
+                        }
+                        ok
+                    })
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                apply(&mut style, &allowed);
+            }
+            None => eprintln!("Taskband: class '{name}' is not defined (skipped)"),
+        }
+    }
+    style
+}
+
+/// A render-ready run: a segment's text with its fully resolved style.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Run {
+    pub text: String,
+    pub style: Style,
+}
+
+/// Resolve one module update into per-segment runs: the module's base style
+/// (already merged default+module css) with each segment's span classes
+/// layered on top.
+pub fn resolve_runs(base: &Style, map: &ClassMap, lines: &[crate::markup::Line]) -> Vec<Vec<Run>> {
+    lines
+        .iter()
+        .map(|line| {
+            line.iter()
+                .map(|seg| Run {
+                    text: seg.text.clone(),
+                    style: with_span_classes(base, map, &seg.classes),
+                })
+                .collect()
+        })
+        .collect()
+}
+
 /// Parse `#rgb` or `#rrggbb`.
 pub fn parse_color(s: &str) -> Option<Color> {
     let hex = s.trim().strip_prefix('#')?;
@@ -208,6 +286,151 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    fn class_map(entries: &[(&str, &[(&str, &str)])]) -> ClassMap {
+        entries
+            .iter()
+            .map(|(name, props)| (name.to_string(), css(props)))
+            .collect()
+    }
+
+    #[test]
+    fn merge_class_maps_overlays_module_onto_top_per_property() {
+        let top = class_map(&[
+            ("critical", &[("color", "#ff5555"), ("font-weight", "bold")]),
+            ("warning", &[("color", "#f5c542")]),
+        ]);
+        let module = class_map(&[
+            ("critical", &[("font-size", "14px")]),
+            ("title", &[("font-weight", "bold")]),
+        ]);
+        let merged = merge_class_maps(&top, &module);
+
+        // module adds a property, top's survive
+        let crit = merged.get("critical").unwrap();
+        assert_eq!(crit.get("color").map(String::as_str), Some("#ff5555"));
+        assert_eq!(crit.get("font-size").map(String::as_str), Some("14px"));
+        // top-only and module-only classes both present
+        assert!(merged.contains_key("warning"));
+        assert!(merged.contains_key("title"));
+    }
+
+    #[test]
+    fn merge_class_maps_module_property_wins() {
+        let top = class_map(&[("critical", &[("color", "#ff5555")])]);
+        let module = class_map(&[("critical", &[("color", "#aa0000")])]);
+        let merged = merge_class_maps(&top, &module);
+        assert_eq!(
+            merged
+                .get("critical")
+                .unwrap()
+                .get("color")
+                .map(String::as_str),
+            Some("#aa0000")
+        );
+    }
+
+    #[test]
+    fn span_classes_layer_in_order_later_wins() {
+        let map = class_map(&[
+            ("warning", &[("color", "#f5c542")]),
+            ("critical", &[("color", "#ff5555"), ("font-weight", "bold")]),
+        ]);
+        let style = with_span_classes(
+            &Style::default(),
+            &map,
+            &["warning".to_string(), "critical".to_string()],
+        );
+        assert_eq!(style.color, parse_color("#ff5555").unwrap());
+        assert_eq!(style.font_weight, 700);
+    }
+
+    #[test]
+    fn span_classes_skip_unknown_class_and_keep_base() {
+        let style = with_span_classes(&Style::default(), &ClassMap::new(), &["ghost".to_string()]);
+        assert_eq!(style, Style::default());
+        let style = with_span_classes(&Style::default(), &ClassMap::new(), &[]);
+        assert_eq!(style, Style::default());
+    }
+
+    #[test]
+    fn span_classes_apply_text_level_properties() {
+        let map = class_map(&[(
+            "hot",
+            &[
+                ("color", "#ff5555"),
+                ("background-color", "#301010"),
+                ("font-family", "Consolas"),
+                ("font-size", "14px"),
+                ("font-weight", "bold"),
+            ],
+        )]);
+        let style = with_span_classes(&Style::default(), &map, &["hot".to_string()]);
+        assert_eq!(style.color, parse_color("#ff5555").unwrap());
+        assert_eq!(style.background, parse_color("#301010"));
+        assert_eq!(style.font_family, "Consolas");
+        assert_eq!(style.font_size, 14);
+        assert_eq!(style.font_weight, 700);
+    }
+
+    #[test]
+    fn span_classes_ignore_module_level_properties() {
+        let map = class_map(&[(
+            "boxy",
+            &[
+                ("padding", "4px"),
+                ("margin", "4px"),
+                ("text-align", "right"),
+                ("color", "#ff5555"),
+            ],
+        )]);
+        let style = with_span_classes(&Style::default(), &map, &["boxy".to_string()]);
+        // the whitelisted property applied, the module-level ones did not
+        assert_eq!(style.color, parse_color("#ff5555").unwrap());
+        assert_eq!(style.padding, Style::default().padding);
+        assert_eq!(style.margin, Style::default().margin);
+        assert_eq!(style.text_align, Style::default().text_align);
+    }
+
+    #[test]
+    fn resolve_runs_layers_span_classes_over_base() {
+        use crate::markup::Segment;
+        let map = class_map(&[("title", &[("color", "#ffffff"), ("font-weight", "bold")])]);
+        let base = Style::default();
+        let lines = vec![vec![
+            Segment {
+                text: "MEM ".into(),
+                classes: vec!["title".into()],
+            },
+            Segment {
+                text: "92%".into(),
+                classes: vec![],
+            },
+        ]];
+        let runs = resolve_runs(&base, &map, &lines);
+
+        // classless segment keeps the base style
+        assert_eq!(runs[0][1].style, base);
+        // span class layers on top of the base style
+        assert_eq!(runs[0][0].style.color, parse_color("#ffffff").unwrap());
+        assert_eq!(runs[0][0].style.font_weight, 700);
+        assert_eq!(runs[0][0].text, "MEM ");
+    }
+
+    #[test]
+    fn resolve_runs_preserves_empty_lines() {
+        use crate::markup::Segment;
+        let lines = vec![
+            vec![Segment {
+                text: "a".into(),
+                classes: vec![],
+            }],
+            vec![],
+        ];
+        let runs = resolve_runs(&Style::default(), &ClassMap::new(), &lines);
+        assert_eq!(runs.len(), 2);
+        assert!(runs[1].is_empty());
     }
 
     #[test]

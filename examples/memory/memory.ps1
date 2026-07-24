@@ -7,12 +7,31 @@
 #
 # Needs a monospace font, or the bar and the figures below it will not line up.
 #
-# config.json:
+# config.json (plain output):
 #   "memory": {
 #       "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\examples\\memory\\memory.ps1\"",
 #       "interval": 5,
 #       "css": { "font-family": "Consolas", "text-align": "left" }
 #   }
+#
+# For styled output (bold title, green bar, percentage that turns yellow at
+# 75% and red at 90%), add "output": "html" and define the classes:
+#   "classes": {
+#       "warning":  { "color": "#f5c542" },
+#       "critical": { "color": "#ff5555", "font-weight": "bold" }
+#   },
+#   "memory": {
+#       "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\examples\\memory\\memory.ps1\" -Styled",
+#       "interval": 5,
+#       "output": "html",
+#       "css": { "font-family": "Consolas", "text-align": "left" },
+#       "classes": {
+#           "title": { "font-weight": "bold", "color": "#ffffff" },
+#           "bar":   { "color": "#7fdbb0" }
+#       }
+#   }
+
+param([switch]$Styled)
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
@@ -41,5 +60,16 @@ $bar = $open + ($filled.ToString() * $n) + ($empty.ToString() * ($SEGMENTS - $n)
 $usedGb = [math]::Round($usedKb / 1MB, 1)
 $totalGb = [math]::Round($totalKb / 1MB, 1)
 
-"MEM $bar"
-"$pct% $dot ${usedGb}G / ${totalGb}G"
+if (-not $Styled) {
+    "MEM $bar"
+    "$pct% $dot ${usedGb}G / ${totalGb}G"
+    exit
+}
+
+# Styled variant: span markup, printed as-is. Needs "output": "html".
+$state = $null
+if ($pct -ge 90) { $state = 'critical' } elseif ($pct -ge 75) { $state = 'warning' }
+
+$pctText = if ($state) { "<span class='$state'>$pct%</span>" } else { "$pct%" }
+"<span class='title'>MEM </span><span class='bar'>$bar</span>"
+"$pctText $dot ${usedGb}G / ${totalGb}G"
