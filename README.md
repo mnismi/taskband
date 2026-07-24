@@ -4,16 +4,18 @@
 
 <h1 align="center">Winbar</h1>
 
-<p align="center">A Waybar-inspired status bar for the Windows taskbar.</p>
+<p align="center">Highly customizable Windows taskbar with custom plugins.</p>
 
 <p align="center">
   <a href="https://github.com/mnismi/winbar/actions/workflows/ci.yml"><img src="https://github.com/mnismi/winbar/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-Winbar renders config-driven status modules directly on the real Windows
-taskbar: CPU load, a clock, or anything a shell command can print. If you
-miss [Waybar](https://github.com/Alexays/Waybar) on Windows, this is for you.
+Winbar puts your own status widgets right on the Windows taskbar: CPU
+usage, a clock, or the output of any command you choose. You describe each
+widget in a simple config file, and Winbar keeps it updated on the bar. If
+you've used [Waybar](https://github.com/Alexays/Waybar) on Linux and miss it
+on Windows, this is for you.
 
 ## Features
 
