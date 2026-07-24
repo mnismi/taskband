@@ -66,6 +66,11 @@ Physical memory in use, with the bar colored by usage level
 
 <img src="examples/memory/memory-preview.png" alt="Memory module on the taskbar: a usage bar over the percentage and gigabytes used">
 
+Disk usage for every fixed drive, each bar colored by its own usage level
+([disk-space](examples/disk-space/)):
+
+<img src="examples/disk-space/disk-space-preview.png" alt="Disk space module on the taskbar: a usage bar per drive, with the percentage and gigabytes used under each">
+
 ## Configuration
 
 Taskband looks for `config.json` next to `Taskband.exe` first, then in the
@@ -189,9 +194,15 @@ many pixels at the right edge so modules don't overlap it.
 ## Examples
 
 The [`examples/`](examples/) folder has ready-to-use modules you can point your
-config at: Claude usage with progress bars, memory in use, and network
-throughput. Each one is a single folder you can copy anywhere; the
-[Previews](#previews) above show the claude-usage and memory modules.
+config at. Each one is a single folder you can copy anywhere; the
+[Previews](#previews) above show them on a real taskbar.
+
+- [claude-usage](examples/claude-usage/): Claude 5-hour and 7-day usage,
+  with progress bars and reset countdowns
+- [disk-space](examples/disk-space/): a usage bar for every fixed drive,
+  colored by usage level
+- [memory](examples/memory/): physical memory in use, with the bar colored
+  by usage level
 
 ## Building from source
 

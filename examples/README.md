@@ -3,15 +3,16 @@
 Ready-to-use Taskband modules. Each folder is self-contained: point a module's
 `exec` at the script inside it.
 
-| Module                          | Shows                                    | Needs                           |
-| ------------------------------- | ---------------------------------------- | ------------------------------- |
-| [claude-usage](claude-usage/)   | Claude 5-hour and 7-day usage, with bars | Node.js 18+, a claude.ai cookie |
-| [memory](memory/)               | Physical memory in use                   | nothing                         |
-| [network-speed](network-speed/) | Download and upload throughput           | nothing                         |
+| Module                        | Shows                                    | Needs                           |
+| ----------------------------- | ---------------------------------------- | ------------------------------- |
+| [claude-usage](claude-usage/) | Claude 5-hour and 7-day usage, with bars | Node.js 18+, a claude.ai cookie |
+| [disk-space](disk-space/)     | Usage bar for every fixed drive          | nothing                         |
+| [memory](memory/)             | Physical memory in use                   | nothing                         |
 
-On the taskbar, claude-usage and memory look like this:
+On the taskbar, claude-usage, disk-space, and memory look like this:
 
 <img src="claude-usage/claude-usage-preview.png" alt="Claude usage module: two progress bars for the 5-hour and 7-day windows">
+<img src="disk-space/disk-space-preview.png" alt="Disk space module: a usage bar per drive, with the percentage and gigabytes used under each">
 <img src="memory/memory-preview.png" alt="Memory module: a usage bar over the percentage and gigabytes used">
 
 Modules with setup worth explaining have their own README. The rest carry their
@@ -45,10 +46,9 @@ these two rules are not relaxed.
 
 **Modules share one worker thread.** Taskband runs due modules one after another
 on a single thread, so a slow module delays every other module for as long as it
-takes. `network-speed` costs about a second per run by design, and
-`claude-usage` waits up to five seconds for the network. Give slow modules a
-generous `interval`, and keep in mind that a one-second `clock` will not tick
-smoothly while a slow module is running.
+takes. `claude-usage` waits up to five seconds for the network. Give slow
+modules a generous `interval`, and keep in mind that a one-second `clock` will
+not tick smoothly while a slow module is running.
 
 **Use a monospace font for anything with bars or columns.** In a proportional
 font, stacked bar lines will not align.
