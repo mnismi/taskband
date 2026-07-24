@@ -1,3 +1,6 @@
 /target
 /dist
 *.zip
+
+# Local design notes, kept out of the published repo
+/docs
