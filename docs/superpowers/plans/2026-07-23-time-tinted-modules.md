@@ -14,7 +14,7 @@
 
 - Purely additive: modules without `time-colors` must render byte-for-byte as today.
 - `time-colors` overrides the text color only — background, font, padding, alignment untouched.
-- Invalid rule entries (hour > 23, unparseable color) warn via `eprintln!("Winbar: ...")` and are skipped; duplicate `from` hours keep the last (warn); all-invalid → fall back to static `color`.
+- Invalid rule entries (hour > 23, unparseable color) warn via `eprintln!("Taskband: ...")` and are skipped; duplicate `from` hours keep the last (warn); all-invalid → fall back to static `color`.
 - Hour source is `GetLocalTime()` at paint time, never the module's output text.
 - No new crates; only the `Win32_System_SystemInformation` feature is added to the existing `windows` dependency.
 - Match existing code style: doc comments on public items, tests in `#[cfg(test)] mod tests` at the bottom of each file.
@@ -234,21 +234,21 @@ fn resolve_time_colors(name: &str, rules: &[TimeColorRule]) -> Vec<(u8, crate::c
     for rule in rules {
         if rule.from > 23 {
             eprintln!(
-                "Winbar: module '{name}' time-colors 'from' {} is not an hour 0-23 (skipped)",
+                "Taskband: module '{name}' time-colors 'from' {} is not an hour 0-23 (skipped)",
                 rule.from
             );
             continue;
         }
         let Some(color) = crate::css::parse_color(&rule.color) else {
             eprintln!(
-                "Winbar: module '{name}' time-colors invalid color '{}' (skipped)",
+                "Taskband: module '{name}' time-colors invalid color '{}' (skipped)",
                 rule.color
             );
             continue;
         };
         if let Some(existing) = out.iter_mut().find(|(h, _)| *h == rule.from) {
             eprintln!(
-                "Winbar: module '{name}' time-colors duplicate 'from' {} (last wins)",
+                "Taskband: module '{name}' time-colors duplicate 'from' {} (last wins)",
                 rule.from
             );
             existing.1 = color;

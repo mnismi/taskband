@@ -104,7 +104,7 @@ fn resolve_list(
                 slot_of.insert(name.clone(), slot);
                 slots.push(slot);
             }
-            None => eprintln!("Winbar: module '{name}' is not defined (skipped)"),
+            None => eprintln!("Taskband: module '{name}' is not defined (skipped)"),
         }
     }
     slots
@@ -124,7 +124,7 @@ pub fn build_registry(cfg: &RawConfig) -> BuildResult {
     for (key, mc) in &cfg.monitors {
         match key.parse::<usize>() {
             Ok(index) => entries.push((index, mc)),
-            Err(_) => eprintln!("Winbar: monitor key '{key}' is not a valid index (skipped)"),
+            Err(_) => eprintln!("Taskband: monitor key '{key}' is not a valid index (skipped)"),
         }
     }
     entries.sort_by_key(|(index, _)| *index);
@@ -145,7 +145,7 @@ pub fn build_registry(cfg: &RawConfig) -> BuildResult {
         )
     } else {
         if !cfg.module_order.is_empty() {
-            eprintln!("Winbar: 'monitors' is set; top-level 'modules' is ignored");
+            eprintln!("Taskband: 'monitors' is set; top-level 'modules' is ignored");
         }
         Vec::new()
     };
@@ -178,7 +178,7 @@ pub fn slots_for_monitor(
 
 /// Resolve the config path: an existing `config.json` next to the executable
 /// wins, then one in the current working directory. If neither exists the
-/// canonical location — next to the executable — is returned anyway, so the
+/// canonical location (next to the executable) is returned anyway, so the
 /// tray's "Edit config" creates it there and the watcher reloads it live.
 pub fn config_path() -> PathBuf {
     let beside_exe = std::env::current_exe()

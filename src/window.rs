@@ -121,7 +121,7 @@ unsafe fn maybe_reload(app: &mut App) -> bool {
     let cfg = match crate::config::load(&app.path) {
         Ok(cfg) => cfg,
         Err(e) => {
-            eprintln!("Winbar: reload skipped — {e}");
+            eprintln!("Taskband: reload skipped: {e}");
             return false;
         }
     };
@@ -148,7 +148,7 @@ unsafe fn maybe_reload(app: &mut App) -> bool {
         bar.total_width = 0;
         bar.clock_reserve = if bar.primary { 0 } else { build.clock_reserve };
     }
-    println!("Winbar: reloaded config — {n} module slot(s).");
+    println!("Taskband: reloaded config, {n} module slot(s).");
     true
 }
 
@@ -228,7 +228,7 @@ pub fn register_class() -> Result<HINSTANCE> {
         let wc = WNDCLASSW {
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
-            lpszClassName: w!("WinbarTaskbarWindow"),
+            lpszClassName: w!("TaskbandTaskbarWindow"),
             hbrBackground: CreateSolidBrush(COLORREF(0x0000_0000)), // black = transparent key
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             ..Default::default()
@@ -243,8 +243,8 @@ pub fn create_bar_window(instance: HINSTANCE) -> Result<HWND> {
     unsafe {
         let hwnd = CreateWindowExW(
             WS_EX_LAYERED,
-            w!("WinbarTaskbarWindow"),
-            w!("Winbar"),
+            w!("TaskbandTaskbarWindow"),
+            w!("Taskband"),
             WS_POPUP | WS_VISIBLE | WS_CLIPSIBLINGS,
             100,
             100,

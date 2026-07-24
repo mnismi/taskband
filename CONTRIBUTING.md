@@ -1,4 +1,4 @@
-# Contributing to Winbar
+# Contributing to Taskband
 
 Thanks for your interest! Bug reports, feature ideas, and pull requests are
 all welcome.

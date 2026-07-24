@@ -1,19 +1,19 @@
 <p align="center">
-  <img src="assets/winbar-logo-1024.png" width="128" alt="Winbar logo">
+  <img src="assets/taskband-logo-1024.png" width="128" alt="Taskband logo">
 </p>
 
-<h1 align="center">Winbar</h1>
+<h1 align="center">Taskband</h1>
 
 <p align="center">Highly customizable Windows taskbar with custom plugins.</p>
 
 <p align="center">
-  <a href="https://github.com/mnismi/winbar/actions/workflows/ci.yml"><img src="https://github.com/mnismi/winbar/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/mnismi/taskband/actions/workflows/ci.yml"><img src="https://github.com/mnismi/taskband/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-Winbar puts your own status widgets right on the Windows taskbar: CPU
+Taskband puts your own status widgets right on the Windows taskbar: CPU
 usage, a clock, or the output of any command you choose. You describe each
-widget in a simple config file, and Winbar keeps it updated on the bar. If
+widget in a simple config file, and Taskband keeps it updated on the bar. If
 you've used [Waybar](https://github.com/Alexays/Waybar) on Linux and miss it
 on Windows, this is for you.
 
@@ -34,9 +34,9 @@ on Windows, this is for you.
 
 ## Installation
 
-Download `Winbar.exe` from the
-[latest release](https://github.com/mnismi/winbar/releases/latest) and run it.
-An icon appears in the system tray; right-click it to manage Winbar.
+Download `Taskband.exe` from the
+[latest release](https://github.com/mnismi/taskband/releases/latest) and run it.
+An icon appears in the system tray; right-click it to manage Taskband.
 
 The binary is not code-signed, so Windows SmartScreen shows a "Windows
 protected your PC" warning the first time you run it. Choose **More info**
@@ -46,16 +46,16 @@ it yourself with the steps below.
 Or build from source:
 
 ```
-git clone https://github.com/mnismi/winbar.git
-cd winbar
+git clone https://github.com/mnismi/taskband.git
+cd taskband
 cargo build --release
 ```
 
-The binary lands at `target/release/Winbar.exe`.
+The binary lands at `target/release/Taskband.exe`.
 
 ## Configuration
 
-Winbar looks for `config.json` next to `Winbar.exe` first, then in the
+Taskband looks for `config.json` next to `Taskband.exe` first, then in the
 current working directory. If neither exists it uses the built-in default;
 the tray's **Edit config** writes that default out beside the exe so you can
 customize it. The file is watched; saving it reloads the bar live.

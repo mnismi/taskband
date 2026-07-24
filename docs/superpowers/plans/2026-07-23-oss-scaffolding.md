@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add the essential files that make Winbar a professional open-source GitHub project: README, LICENSE, CONTRIBUTING, repo hygiene fixes, and GitHub Actions for CI checks and tagged releases.
+**Goal:** Add the essential files that make Taskband a professional open-source GitHub project: README, LICENSE, CONTRIBUTING, repo hygiene fixes, and GitHub Actions for CI checks and tagged releases.
 
 **Architecture:** Pure scaffolding — no Rust source changes except whatever `cargo fmt`/`clippy` fixes are needed to make CI green. Each deliverable is one file (or one hygiene fix) committed independently. Verification is running the exact commands CI will run.
 
@@ -10,11 +10,11 @@
 
 ## Global Constraints
 
-- Public name is **Winbar**; GitHub location is **`mnismi/winbar`** (use verbatim in badges/URLs).
+- Public name is **Taskband**; GitHub location is **`mnismi/taskband`** (use verbatim in badges/URLs).
 - License is **MIT**, copyright line exactly: `Copyright (c) 2026 Mohamed Nismi`
 - CI runs on `windows-latest` only (this is a Windows-only app).
 - CI triggers on branches `main` and `master`; release triggers on tags `v*`.
-- Binary artifact name is `Winbar.exe` (capital W — set by `[[bin]]` in Cargo.toml).
+- Binary artifact name is `Taskband.exe` (capital W — set by `[[bin]]` in Cargo.toml).
 - Commit messages follow conventional-commit style (`feat:`, `fix:`, `docs:`, `style:`, `ci:`, `chore:`).
 - This repo currently sits on branch `master` with no remote; nothing is pushed by this plan.
 
@@ -121,26 +121,26 @@ git commit -m "docs: add MIT license"
 - Create: `README.md`
 
 **Interfaces:**
-- Consumes: `LICENSE` from Task 2 (linked), logo at `assets/winbar-logo-1024.png` (already in repo).
+- Consumes: `LICENSE` from Task 2 (linked), logo at `assets/taskband-logo-1024.png` (already in repo).
 - Produces: `README.md` referencing `.github/workflows/ci.yml` (created in Task 6 — the badge 404s until then, which is fine locally since nothing is pushed).
 
 - [ ] **Step 1: Create `README.md` with exactly this content**
 
 ````markdown
 <p align="center">
-  <img src="assets/winbar-logo-1024.png" width="128" alt="Winbar logo">
+  <img src="assets/taskband-logo-1024.png" width="128" alt="Taskband logo">
 </p>
 
-<h1 align="center">Winbar</h1>
+<h1 align="center">Taskband</h1>
 
 <p align="center">A Waybar-inspired status bar for the Windows taskbar.</p>
 
 <p align="center">
-  <a href="https://github.com/mnismi/winbar/actions/workflows/ci.yml"><img src="https://github.com/mnismi/winbar/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/mnismi/taskband/actions/workflows/ci.yml"><img src="https://github.com/mnismi/taskband/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-Winbar renders config-driven status modules directly on the real Windows
+Taskband renders config-driven status modules directly on the real Windows
 taskbar — CPU load, a clock, or anything a shell command can print. If you
 miss [Waybar](https://github.com/Alexays/Waybar) on Windows, this is for you.
 
@@ -161,23 +161,23 @@ miss [Waybar](https://github.com/Alexays/Waybar) on Windows, this is for you.
 
 ## Installation
 
-Download `Winbar.exe` from the
-[latest release](https://github.com/mnismi/winbar/releases/latest) and run it.
-An icon appears in the system tray; right-click it to manage Winbar.
+Download `Taskband.exe` from the
+[latest release](https://github.com/mnismi/taskband/releases/latest) and run it.
+An icon appears in the system tray; right-click it to manage Taskband.
 
 Or build from source:
 
 ```
-git clone https://github.com/mnismi/winbar.git
-cd winbar
+git clone https://github.com/mnismi/taskband.git
+cd taskband
 cargo build --release
 ```
 
-The binary lands at `target/release/Winbar.exe`.
+The binary lands at `target/release/Taskband.exe`.
 
 ## Configuration
 
-Winbar looks for `config.json` next to `Winbar.exe` first, then in the
+Taskband looks for `config.json` next to `Taskband.exe` first, then in the
 current working directory. If neither exists it uses the built-in default;
 the tray's **Edit config** writes that default out beside the exe so you can
 customize it. The file is watched — saving it reloads the bar live.
@@ -266,7 +266,7 @@ cargo build --release # console-less background app
 
 - [ ] **Step 2: Verify the logo path resolves**
 
-Run: `ls assets/winbar-logo-1024.png`
+Run: `ls assets/taskband-logo-1024.png`
 Expected: the file is listed (no error).
 
 - [ ] **Step 3: Commit**
@@ -288,7 +288,7 @@ git commit -m "docs: add README"
 - [ ] **Step 1: Create `CONTRIBUTING.md` with exactly this content**
 
 ````markdown
-# Contributing to Winbar
+# Contributing to Taskband
 
 Thanks for your interest! Bug reports, feature ideas, and pull requests are
 all welcome.
@@ -438,8 +438,8 @@ git commit -m "ci: add fmt/clippy/test/build workflow"
 - Create: `.github/workflows/release.yml`
 
 **Interfaces:**
-- Consumes: `Winbar.exe` produced by `cargo build --release`; repo `config.json`.
-- Produces: on tag `v*`, a GitHub Release with `winbar-<tag>-x86_64-windows.zip` attached.
+- Consumes: `Taskband.exe` produced by `cargo build --release`; repo `config.json`.
+- Produces: on tag `v*`, a GitHub Release with `taskband-<tag>-x86_64-windows.zip` attached.
 
 - [ ] **Step 1: Create `.github/workflows/release.yml` with exactly this content**
 
@@ -471,14 +471,14 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          Copy-Item target/release/Winbar.exe dist/
+          Copy-Item target/release/Taskband.exe dist/
           Copy-Item config.json dist/
-          Compress-Archive -Path dist/* -DestinationPath "winbar-${{ github.ref_name }}-x86_64-windows.zip"
+          Compress-Archive -Path dist/* -DestinationPath "taskband-${{ github.ref_name }}-x86_64-windows.zip"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: winbar-*-x86_64-windows.zip
+          files: taskband-*-x86_64-windows.zip
           generate_release_notes: true
 ```
 
@@ -499,6 +499,6 @@ git commit -m "ci: add tagged release workflow with zipped exe"
 ## After the plan
 
 Manual steps for the maintainer (not part of this plan): create the
-`mnismi/winbar` repo on GitHub, `git remote add origin
-https://github.com/mnismi/winbar.git`, `git push -u origin main`, and later
+`mnismi/taskband` repo on GitHub, `git remote add origin
+https://github.com/mnismi/taskband.git`, `git push -u origin main`, and later
 `git tag v0.1.0 && git push origin v0.1.0` to cut the first release.

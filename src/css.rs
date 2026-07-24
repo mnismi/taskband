@@ -185,7 +185,7 @@ fn apply(style: &mut Style, css: &HashMap<String, String>) {
                 key,
                 value,
             ),
-            other => eprintln!("Winbar: unknown css property '{other}' (ignored)"),
+            other => eprintln!("Taskband: unknown css property '{other}' (ignored)"),
         }
     }
 }
@@ -194,7 +194,7 @@ fn apply(style: &mut Style, css: &HashMap<String, String>) {
 fn set<T>(parsed: Option<T>, mut assign: impl FnMut(T), key: &str, value: &str) {
     match parsed {
         Some(v) => assign(v),
-        None => eprintln!("Winbar: invalid value '{value}' for css '{key}' (ignored)"),
+        None => eprintln!("Taskband: invalid value '{value}' for css '{key}' (ignored)"),
     }
 }
 

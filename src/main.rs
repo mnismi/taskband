@@ -15,12 +15,12 @@ fn main() -> windows::core::Result<()> {
     // A missing config falls back to the built-in default inside `load`; a config
     // that exists but fails to parse also falls back, so the app always starts.
     let cfg = config::load(&path).unwrap_or_else(|e| {
-        eprintln!("Winbar: {e}; using built-in default config");
+        eprintln!("Taskband: {e}; using built-in default config");
         config::parse(config::DEFAULT_CONFIG).expect("built-in config must parse")
     });
 
     let monitors = taskbar::detect();
-    println!("Winbar monitors:");
+    println!("Taskband monitors:");
     for m in &monitors {
         println!("{}", taskbar::monitor_log_line(m));
     }
@@ -32,9 +32,9 @@ fn main() -> windows::core::Result<()> {
     for &idx in build.monitors.keys() {
         match monitors.iter().find(|m| m.index == idx) {
             Some(m) if m.taskbar.is_none() => eprintln!(
-                "Winbar: monitor {idx} has no taskbar — enable 'Show my taskbar on all displays'."
+                "Taskband: monitor {idx} has no taskbar; enable 'Show my taskbar on all displays'."
             ),
-            None => eprintln!("Winbar: monitor {idx} does not exist (skipped)."),
+            None => eprintln!("Taskband: monitor {idx} does not exist (skipped)."),
             _ => {}
         }
     }
@@ -65,7 +65,7 @@ fn main() -> windows::core::Result<()> {
     }
 
     if bars.is_empty() {
-        eprintln!("Winbar: no taskbars found; nothing to display.");
+        eprintln!("Taskband: no taskbars found; nothing to display.");
         std::process::exit(1);
     }
     let driver = driver.unwrap_or_else(|| bars[0].hwnd());
@@ -75,7 +75,7 @@ fn main() -> windows::core::Result<()> {
     window::install(app, driver);
     tray::install(instance, driver, path)?;
     println!(
-        "Winbar embedded on {bar_count} monitor(s), {slot_count} module slot(s). Edit config.json to reload live."
+        "Taskband embedded on {bar_count} monitor(s), {slot_count} module slot(s). Edit config.json to reload live."
     );
     window::run_message_loop();
     Ok(())

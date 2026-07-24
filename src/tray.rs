@@ -43,7 +43,7 @@ const ID_STARTUP: usize = 3;
 const ID_QUIT: usize = 4;
 
 const RUN_SUBKEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-const RUN_VALUE: PCWSTR = w!("Winbar");
+const RUN_VALUE: PCWSTR = w!("Taskband");
 
 /// Per-window tray state, owned via `GWLP_USERDATA`.
 struct TrayState {
@@ -61,7 +61,7 @@ pub fn install(instance: HINSTANCE, driver: HWND, path: PathBuf) -> Result<()> {
         let wc = WNDCLASSW {
             lpfnWndProc: Some(tray_wndproc),
             hInstance: instance,
-            lpszClassName: w!("WinbarTrayWindow"),
+            lpszClassName: w!("TaskbandTrayWindow"),
             ..Default::default()
         };
         RegisterClassW(&wc);
@@ -70,8 +70,8 @@ pub fn install(instance: HINSTANCE, driver: HWND, path: PathBuf) -> Result<()> {
         // the taskbar. It exists only to own the icon and host the popup menu.
         let hwnd = CreateWindowExW(
             WS_EX_TOOLWINDOW,
-            w!("WinbarTrayWindow"),
-            w!("Winbar"),
+            w!("TaskbandTrayWindow"),
+            w!("Taskband"),
             WS_OVERLAPPED,
             0,
             0,
@@ -109,7 +109,7 @@ pub fn install(instance: HINSTANCE, driver: HWND, path: PathBuf) -> Result<()> {
             hIcon: hicon,
             ..Default::default()
         };
-        let tip: Vec<u16> = "Winbar".encode_utf16().collect();
+        let tip: Vec<u16> = "Taskband".encode_utf16().collect();
         nid.szTip[..tip.len()].copy_from_slice(&tip);
         let _ = Shell_NotifyIconW(NIM_ADD, &nid);
 
@@ -225,7 +225,7 @@ unsafe fn edit_config(hwnd: HWND, path: &Path) {
     );
 }
 
-/// Whether the `Winbar` value exists under the per-user `Run` key.
+/// Whether the `Taskband` value exists under the per-user `Run` key.
 pub fn startup_enabled() -> bool {
     unsafe {
         let mut size = 0u32;

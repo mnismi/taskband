@@ -1,16 +1,16 @@
 [package]
-name = "winbar"
+name = "taskband"
 version = "0.1.0"
 edition = "2021"
 description = "Highly customizable Windows taskbar with custom plugins"
 license = "MIT"
-repository = "https://github.com/mnismi/winbar"
+repository = "https://github.com/mnismi/taskband"
 readme = "README.md"
 keywords = ["taskbar", "windows", "waybar", "statusbar"]
 categories = ["gui"]
 
 [[bin]]
-name = "Winbar"
+name = "Taskband"
 path = "src/main.rs"
 
 [dependencies]

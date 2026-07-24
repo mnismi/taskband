@@ -25,12 +25,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
-          Copy-Item target/release/Winbar.exe dist/
+          Copy-Item target/release/Taskband.exe dist/
           Copy-Item config.json dist/
-          Compress-Archive -Path dist/* -DestinationPath "winbar-${{ github.ref_name }}-x86_64-windows.zip"
+          Compress-Archive -Path dist/* -DestinationPath "taskband-${{ github.ref_name }}-x86_64-windows.zip"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: winbar-*-x86_64-windows.zip
+          files: taskband-*-x86_64-windows.zip
           generate_release_notes: true

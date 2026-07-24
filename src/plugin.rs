@@ -38,7 +38,7 @@ fn run_exec(name: &str, exec: &str) -> String {
     {
         Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         Err(e) => {
-            eprintln!("Winbar: module '{name}' exec failed: {e}");
+            eprintln!("Taskband: module '{name}' exec failed: {e}");
             String::new()
         }
     }

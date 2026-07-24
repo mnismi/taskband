@@ -3,7 +3,7 @@
 ///
 /// `taskbar_left` is the taskbar's screen left edge; `obstacle_lefts` are the
 /// obstacles' screen left edges (same origin). `right_reserve` reserves that
-/// many pixels at the taskbar's right edge — used for the Windows 11 secondary
+/// many pixels at the taskbar's right edge, used for the Windows 11 secondary
 /// taskbar clock, which is painted inside the full-width XAML host and so has no
 /// obstacle window to detect. The result is in taskbar-client coordinates
 /// (relative to `taskbar_left`) and clamped to `>= 0`. With no obstacles the

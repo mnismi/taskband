@@ -1,4 +1,4 @@
-# Open-Source Scaffolding for Winbar — Design
+# Open-Source Scaffolding for Taskband — Design
 
 **Date:** 2026-07-23
 **Status:** Approved
@@ -7,27 +7,27 @@
 
 Make the repository presentable as a professional open-source project on GitHub.
 Scope is "essentials only": README, LICENSE, CONTRIBUTING, repo hygiene fixes,
-and GitHub Actions for checks and releases. The public name is **Winbar**.
+and GitHub Actions for checks and releases. The public name is **Taskband**.
 
 ## Decisions
 
 - **License:** MIT, `Copyright (c) 2026 Mohamed Nismi`
 - **Host:** GitHub (`.github/` conventions)
 - **CI:** checks on push/PR, plus release artifacts on version tags
-- **Name:** "Winbar" everywhere; tagline mentions Waybar-inspired
+- **Name:** "Taskband" everywhere; tagline mentions Waybar-inspired
 
 ## Deliverables
 
 ### 1. README.md
 
-- Logo (`assets/winbar-logo-1024.png`, displayed at reduced width), title
-  **Winbar**, tagline: "A Waybar-inspired status bar for the Windows taskbar."
+- Logo (`assets/taskband-logo-1024.png`, displayed at reduced width), title
+  **Taskband**, tagline: "A Waybar-inspired status bar for the Windows taskbar."
 - Badges: CI status, MIT license.
 - **Features:** config-driven modules rendered on the real taskbar; per-monitor
   module routing; JSON5 config (comments + trailing commas) with live hot
   reload; per-module CSS-like styling; system tray icon with "Edit config";
   single self-contained `.exe` with a baked-in default config.
-- **Installation:** download `Winbar.exe` from GitHub Releases, or build from
+- **Installation:** download `Taskband.exe` from GitHub Releases, or build from
   source with `cargo build --release`.
 - **Configuration:** config lives beside the exe (`config.json`); document the
   module format (`exec`, `interval`, `css`), top-level `modules` order, the
@@ -69,8 +69,8 @@ Run fmt/clippy locally as part of this work so CI is green from the first push.
 
 ### 6. .github/workflows/release.yml
 
-On tag push matching `v*`: build release on `windows-latest`, zip `Winbar.exe`
-together with `config.json` as `winbar-<tag>-x86_64-windows.zip`, and create a
+On tag push matching `v*`: build release on `windows-latest`, zip `Taskband.exe`
+together with `config.json` as `taskband-<tag>-x86_64-windows.zip`, and create a
 GitHub Release with the zip attached (`softprops/action-gh-release` or `gh
 release create`). `permissions: contents: write`.
 
