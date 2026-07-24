@@ -12,22 +12,22 @@
 </p>
 
 Winbar renders config-driven status modules directly on the real Windows
-taskbar — CPU load, a clock, or anything a shell command can print. If you
+taskbar: CPU load, a clock, or anything a shell command can print. If you
 miss [Waybar](https://github.com/Alexays/Waybar) on Windows, this is for you.
 
 ## Features
 
-- **Modules on the real taskbar** — no floating overlay window; bars embed
+- **Modules on the real taskbar**: no floating overlay window; bars embed
   into the taskbar itself, on every monitor that has one
-- **Anything is a module** — a module is just a command (`exec`) run on an
+- **Anything is a module**: a module is just a command (`exec`) run on an
   `interval`; its output is rendered on the bar, multi-line output included
-- **Per-monitor routing** — send different modules to different monitors
-- **CSS-like styling** — global defaults plus per-module overrides for color,
+- **Per-monitor routing**: send different modules to different monitors
+- **CSS-like styling**: global defaults plus per-module overrides for color,
   background, font, padding, margin, and text alignment
-- **JSON5 config with live reload** — comments and trailing commas allowed;
+- **JSON5 config with live reload**: comments and trailing commas allowed;
   edits apply instantly, no restart
-- **System tray** — reload config, edit config, toggle start-at-login, quit
-- **Single self-contained `.exe`** — a default config is baked in, so the
+- **System tray**: reload config, edit config, toggle start-at-login, quit
+- **Single self-contained `.exe`**: a default config is baked in, so the
   binary runs on its own
 
 ## Installation
@@ -51,7 +51,7 @@ The binary lands at `target/release/Winbar.exe`.
 Winbar looks for `config.json` next to `Winbar.exe` first, then in the
 current working directory. If neither exists it uses the built-in default;
 the tray's **Edit config** writes that default out beside the exe so you can
-customize it. The file is watched — saving it reloads the bar live.
+customize it. The file is watched; saving it reloads the bar live.
 
 The format is [JSON5](https://json5.org/), so comments and trailing commas
 are fine:
@@ -88,7 +88,7 @@ are fine:
 
 | Key        | Type   | Default | Description                                    |
 | ---------- | ------ | ------- | ---------------------------------------------- |
-| `exec`     | string | —       | Command to run; stdout becomes the module text |
+| `exec`     | string | (required) | Command to run; stdout becomes the module text |
 | `interval` | number | `5`     | Seconds between runs                           |
 | `css`      | object | `{}`    | Style overrides for this module                |
 
@@ -98,7 +98,7 @@ Supported CSS properties, in the global `css` block or per module:
 
 `color`, `background-color`, `font-family`, `font-size` (px),
 `font-weight` (`normal`, `bold`, or a number), `padding`, `margin`
-(1–4 edge values, px), `text-align` (`left`, `center`, `right`).
+(1-4 edge values, px), `text-align` (`left`, `center`, `right`).
 
 ### Multiple monitors
 
