@@ -22,6 +22,16 @@ pub fn compute_x(
     (boundary_client - gap - width).max(0)
 }
 
+/// Whether a bar should be repositioned this tick. While the taskbar is hidden
+/// (fullscreen game) nothing moves. A primary taskbar always has a detectable
+/// tray, so an empty obstacle scan there is a transient state: repositioning
+/// would take compute_x's park-far-right fallback and overlap the tray/clock.
+/// A secondary has no obstacle window for its clock; the reserve-based
+/// fallback is its normal path, so it repositions regardless of obstacles.
+pub fn should_reposition(taskbar_visible: bool, primary: bool, has_obstacles: bool) -> bool {
+    taskbar_visible && (!primary || has_obstacles)
+}
+
 /// Pack module widths left-to-right with no extra gaps (each width already
 /// includes its own padding + margin). Returns each module's left offset within
 /// the bar and the total bar width.
@@ -84,6 +94,35 @@ mod tests {
         // cap = 5360 - 100 = 5260; min(5000, 5260) = 5000; client = 5000 - 1920 = 3080
         // x = 3080 - 8 - 185 = 2887
         assert_eq!(compute_x(1920, 3440, &[5000], 185, 8, 100), 2887);
+    }
+
+    #[test]
+    fn skips_reposition_while_taskbar_hidden() {
+        // fullscreen game: explorer hides the taskbar, obstacle scan is empty
+        assert!(!should_reposition(false, true, false));
+        assert!(!should_reposition(false, false, false));
+        // hidden taskbar wins even if obstacles are somehow still reported
+        assert!(!should_reposition(false, true, true));
+    }
+
+    #[test]
+    fn primary_with_no_obstacles_keeps_position() {
+        // the primary always has a detectable tray; an empty scan means a
+        // transient state, so parking far right would overlap the tray/clock
+        assert!(!should_reposition(true, true, false));
+    }
+
+    #[test]
+    fn primary_with_obstacles_repositions() {
+        assert!(should_reposition(true, true, true));
+    }
+
+    #[test]
+    fn secondary_repositions_with_or_without_obstacles() {
+        // the secondary clock has no obstacle window; the reserve-based
+        // fallback in compute_x is its normal path
+        assert!(should_reposition(true, false, false));
+        assert!(should_reposition(true, false, true));
     }
 
     #[test]

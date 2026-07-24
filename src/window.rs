@@ -14,8 +14,9 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetMessageW, GetWindow,
-    GetWindowLongPtrW, GetWindowRect, IsWindowVisible, KillTimer, LoadCursorW, PostQuitMessage,
+    CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClassNameW, GetClientRect, GetMessageW,
+    GetWindow, GetWindowLongPtrW, GetWindowRect, IsWindowVisible, KillTimer, LoadCursorW,
+    PostQuitMessage,
     RegisterClassW, SetLayeredWindowAttributes, SetParent, SetTimer, SetWindowLongPtrW,
     SetWindowPos, TranslateMessage, GWLP_USERDATA, GWL_STYLE, GW_CHILD, GW_HWNDNEXT, HWND_TOP,
     IDC_ARROW, LWA_COLORKEY, MSG, SWP_SHOWWINDOW, WINDOW_STYLE, WM_APP, WM_DESTROY, WM_PAINT,
@@ -327,6 +328,40 @@ pub fn install(app: App, driver: HWND) {
     }
 }
 
+/// TEMPORARY diagnostics for the fullscreen-overlap bug: append one line to
+/// `taskband-position.log` beside the exe. Remove once the bug is closed.
+fn debug_log(line: &str) {
+    use std::io::Write;
+    let path = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.join("taskband-position.log")))
+        .unwrap_or_else(|| PathBuf::from("taskband-position.log"));
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let _ = writeln!(f, "[{}.{:03}] {line}", now.as_secs(), now.subsec_millis());
+    }
+}
+
+/// Log `state` for this bar only when it differs from the previous tick, so the
+/// log captures every transition without growing 4 lines/second.
+fn debug_log_if_changed(bar_hwnd: HWND, state: &str) {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    thread_local! {
+        static LAST: RefCell<HashMap<isize, String>> = RefCell::new(HashMap::new());
+    }
+    LAST.with(|last| {
+        let mut map = last.borrow_mut();
+        let key = bar_hwnd.0 as isize;
+        if map.get(&key).map(String::as_str) != Some(state) {
+            debug_log(&format!("bar={key:x} {state}"));
+            map.insert(key, state.to_string());
+        }
+    });
+}
+
 /// Recompute where one bar should sit (just left of its taskbar's tray / embedded
 /// apps) and move it there only if something changed.
 fn reposition(bar: &Bar) {
@@ -334,27 +369,53 @@ fn reposition(bar: &Bar) {
         let width = bar.total_width;
         let mut tb = RECT::default();
         if GetWindowRect(bar.taskbar, &mut tb).is_err() {
+            debug_log_if_changed(bar.hwnd, "GetWindowRect(taskbar) failed");
             return;
         }
         let taskbar_left = tb.left;
         let taskbar_width = tb.right - tb.left;
         let tb_height = tb.bottom - tb.top;
+        let tb_visible = IsWindowVisible(bar.taskbar).as_bool();
+
+        let mut dbg = format!(
+            "tb=({},{})-({},{}) vis={tb_visible}",
+            tb.left, tb.top, tb.right, tb.bottom
+        );
 
         // Obstacle = a visible sibling in the right half that is not full-width
         // (excludes the full-width XAML content bridge) and not our own window.
         let mut obstacles: Vec<i32> = Vec::new();
         let mut sib = GetWindow(bar.taskbar, GW_CHILD).ok();
         while let Some(h) = sib {
-            if h != bar.hwnd && IsWindowVisible(h).as_bool() {
-                let mut r = RECT::default();
-                if GetWindowRect(h, &mut r).is_ok() {
-                    let w = r.right - r.left;
-                    if r.left > taskbar_left + taskbar_width / 2 && w < taskbar_width {
-                        obstacles.push(r.left);
-                    }
+            let mut cls = [0u16; 64];
+            let n = GetClassNameW(h, &mut cls).max(0) as usize;
+            let name = String::from_utf16_lossy(&cls[..n]);
+            let vis = IsWindowVisible(h).as_bool();
+            let mut r = RECT::default();
+            let has_rect = GetWindowRect(h, &mut r).is_ok();
+            let is_self = h == bar.hwnd;
+            if has_rect {
+                let w = r.right - r.left;
+                if !is_self && vis && r.left > taskbar_left + taskbar_width / 2 && w < taskbar_width
+                {
+                    obstacles.push(r.left);
                 }
+                dbg.push_str(&format!(
+                    " | {}{name} v={} l={} w={w}",
+                    if is_self { "SELF:" } else { "" },
+                    vis as u8,
+                    r.left
+                ));
+            } else {
+                dbg.push_str(&format!(" | {name} norect"));
             }
             sib = GetWindow(h, GW_HWNDNEXT).ok();
+        }
+
+        if !crate::layout::should_reposition(tb_visible, bar.primary, !obstacles.is_empty()) {
+            dbg.push_str(" => SKIP");
+            debug_log_if_changed(bar.hwnd, &dbg);
+            return;
         }
 
         let x = crate::layout::compute_x(
@@ -373,7 +434,13 @@ fn reposition(bar: &Bar) {
         let cur_x = cur.left - taskbar_left;
         let cur_w = cur.right - cur.left;
         let cur_h = cur.bottom - cur.top;
+        dbg.push_str(&format!(" => x={x} (cur_x={cur_x} cur_w={cur_w})"));
+        debug_log_if_changed(bar.hwnd, &dbg);
         if cur_x != x || cur_w != width || cur_h != tb_height {
+            debug_log(&format!(
+                "MOVE bar={:x} x={x} w={width} h={tb_height} from cur_x={cur_x} cur_w={cur_w} cur_h={cur_h}",
+                bar.hwnd.0 as isize
+            ));
             let _ = SetWindowPos(bar.hwnd, HWND_TOP, x, 0, width, tb_height, SWP_SHOWWINDOW);
         }
     }
@@ -492,6 +559,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_TIMER => {
+                // TEMPORARY: heartbeat every 40 ticks (~10s) proves the timer
+                // is alive while a fullscreen game runs.
+                {
+                    use std::cell::Cell;
+                    thread_local! { static TICKS: Cell<u64> = const { Cell::new(0) }; }
+                    let t = TICKS.with(|c| {
+                        let t = c.get() + 1;
+                        c.set(t);
+                        t
+                    });
+                    if t % 40 == 0 {
+                        debug_log(&format!("heartbeat tick={t}"));
+                    }
+                }
                 let app_ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut App;
                 if !app_ptr.is_null() {
                     let app = &mut *app_ptr;
