@@ -34,4 +34,4 @@ subject line imperative and under ~72 characters.
 
 ## Questions
 
-Open an issue — there's no discussion forum yet.
+Open an issue: there's no discussion forum yet.
