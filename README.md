@@ -38,6 +38,11 @@ Download `Winbar.exe` from the
 [latest release](https://github.com/mnismi/winbar/releases/latest) and run it.
 An icon appears in the system tray; right-click it to manage Winbar.
 
+The binary is not code-signed, so Windows SmartScreen shows a "Windows
+protected your PC" warning the first time you run it. Choose **More info**
+then **Run anyway**. If you would rather not trust a prebuilt binary, build
+it yourself with the steps below.
+
 Or build from source:
 
 ```
@@ -131,6 +136,14 @@ Requires [Rust](https://rustup.rs/) stable on Windows.
 cargo run             # debug build; keeps a console for diagnostics
 cargo build --release # console-less background app
 ```
+
+## Security
+
+A module is a shell command, so `config.json` is executable content: anything
+in an `exec` value runs as you, and the file is reloaded automatically when it
+changes. Treat it like a script rather than a settings file. Only run configs
+you wrote or have read, and keep the file somewhere other users on the machine
+cannot write to.
 
 ## License
 
