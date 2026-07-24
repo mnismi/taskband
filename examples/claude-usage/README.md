@@ -4,9 +4,11 @@ Shows your Claude usage on the taskbar as two progress bars: the 5-hour session
 window and the 7-day window, each with the percentage used and a countdown to
 when it resets.
 
+<img src="claude-usage-preview.png" alt="The module on the taskbar: 5H and 7D progress bars with percentages and reset countdowns">
+
 ```
-5H ［￭￭････････］  20% · 3h 46m
-7D ［￭￭￭￭￭￭････］  61% · 2d 2h
+5H [▪▪········]  20% · 3h 46m
+7D [▪▪▪▪▪▪····]  61% · 2d 2h
 ```
 
 ## Requirements

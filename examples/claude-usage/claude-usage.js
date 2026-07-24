@@ -7,16 +7,17 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 // Glyphs are written as escapes rather than literals so that re-encoding this
-// file cannot corrupt them:
-//   ［ [  ］ ]  fullwidth brackets
-//   ￭    filled segment
-//   ･    empty segment
-//   ·    middle dot separator
+// file cannot corrupt them. Every glyph must exist in Consolas and Cascadia
+// Mono with its standard monospace advance, or the bar's rendered width
+// changes with its fill level (the fullwidth ￭/･ glyphs came from fallback
+// fonts and did exactly that):
+//   ▪    filled segment (U+25AA)
+//   ·    empty segment, also the separator (U+00B7)
 const SEGMENTS = 10;
-const FILLED = '\uFFED';
-const EMPTY = '\uFF65';
-const OPEN = '\uFF3B';
-const CLOSE = '\uFF3D';
+const FILLED = '\u25AA';
+const EMPTY = '\u00B7';
+const OPEN = '[';
+const CLOSE = ']';
 const DOT = '\u00B7';
 
 /** A 10-segment bar, one segment per 10%. Out-of-range input is clamped. */

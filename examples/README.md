@@ -9,6 +9,11 @@ Ready-to-use Taskband modules. Each folder is self-contained: point a module's
 | [memory](memory/)               | Physical memory in use                   | nothing                         |
 | [network-speed](network-speed/) | Download and upload throughput           | nothing                         |
 
+On the taskbar, claude-usage and memory look like this:
+
+<img src="claude-usage/claude-usage-preview.png" alt="Claude usage module: two progress bars for the 5-hour and 7-day windows">
+<img src="memory/memory-preview.png" alt="Memory module: a usage bar over the percentage and gigabytes used">
+
 Modules with setup worth explaining have their own README. The rest carry their
 config snippet in a comment at the top of the script.
 

@@ -4,10 +4,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const m = require('./claude-usage.js');
 
-const OPEN = '\uFF3B';
-const CLOSE = '\uFF3D';
-const FILLED = '\uFFED';
-const EMPTY = '\uFF65';
+const OPEN = '[';
+const CLOSE = ']';
+const FILLED = '\u25AA';
+const EMPTY = '\u00B7';
 const MIN = 60_000;
 
 /** Expected bar with `n` of 10 segments filled. */
