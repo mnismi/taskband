@@ -128,6 +128,12 @@ taskbar on all displays** enabled. Windows 11 paints its own clock on
 secondary taskbars; `"secondary-clock-reserve"` (default `100`) reserves that
 many pixels at the right edge so modules don't overlap it.
 
+## Examples
+
+The [`examples/`](examples/) folder has ready-to-use modules you can point your
+config at: Claude usage with progress bars, memory in use, and network
+throughput. Each one is a single folder you can copy anywhere.
+
 ## Building from source
 
 Requires [Rust](https://rustup.rs/) stable on Windows.
