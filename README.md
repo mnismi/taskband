@@ -29,7 +29,11 @@ on Windows, this is for you.
   module restyle itself, or parts of a line, based on what it reports
 - **JSON5 config with live reload**: comments and trailing commas allowed;
   edits apply instantly, no restart
-- **System tray**: reload config, edit config, toggle start-at-login, quit
+- **Visual configuration**: a drag-and-drop configurator in your browser,
+  opened from the tray, arranges modules across monitors and can drop in
+  ready-made modules from a built-in catalog
+- **System tray**: configure visually, reload config, edit config, toggle
+  start-at-login, quit
 - **Single self-contained `.exe`**: a default config is baked in, so the
   binary runs on its own
 
@@ -77,6 +81,15 @@ Taskband looks for `config.json` next to `Taskband.exe` first, then in the
 current working directory. If neither exists it uses the built-in default;
 the tray's **Edit config** writes that default out beside the exe so you can
 customize it. The file is watched; saving it reloads the bar live.
+
+For arranging modules without touching JSON, right-click the tray icon and
+choose **Configure...**: a drag-and-drop page opens in your browser with one
+column per monitor. Apply rewrites only the `monitors` section of
+`config.json` (your comments and styling stay put), and the bars update
+instantly. Modules added from the built-in catalog write their script to a
+`modules` folder next to `config.json`.
+
+<img src="assets/configuration-page.png" alt="Taskband configurator in the browser: a module palette on the left and one drag-and-drop column per monitor, each labeled with the monitor's name and resolution">
 
 The format is [JSON5](https://json5.org/), so comments and trailing commas
 are fine:

@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taskband configurator</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: flex; flex-direction: column;
+    font: 14px "Segoe UI", sans-serif; background: #1b1b1f; color: #d0d0d0;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    background: #232327; border-bottom: 1px solid #333;
+  }
+  header h1 { font-size: 16px; margin: 0; flex: 1; font-weight: 600; }
+  button {
+    font: inherit; padding: 6px 16px; border-radius: 6px;
+    border: 1px solid #444; background: #2d2d33; color: #d0d0d0; cursor: pointer;
+  }
+  button:disabled { opacity: .4; cursor: default; }
+  #apply { background: #2f6b4f; border-color: #3d8a66; color: #fff; }
+  #banner {
+    display: none; align-items: center; padding: 8px 16px;
+    background: #5a2727; color: #ffdddd;
+  }
+  #banner.show { display: flex; }
+  #banner span { flex: 1; }
+  main { display: flex; flex: 1; min-height: 0; }
+  #palette {
+    width: 240px; overflow-y: auto; padding: 16px;
+    background: #202024; border-right: 1px solid #333; flex-shrink: 0;
+  }
+  #palette .card { margin-bottom: 8px; }
+  #palette h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+    color: #888; margin: 14px 0 6px;
+  }
+  #palette h2:first-child { margin-top: 0; }
+  #board {
+    flex: 1; display: flex; gap: 16px; padding: 16px;
+    overflow: auto; align-items: flex-start;
+  }
+  .column {
+    flex: 1; min-width: 230px; background: #202024;
+    border: 1px solid #333; border-radius: 8px;
+  }
+  .column h3 {
+    font-size: 13px; font-weight: 600; margin: 0; padding: 10px 12px;
+    border-bottom: 1px solid #333; color: #aaa;
+  }
+  .column h3 .warn { color: #f5c542; font-weight: 400; font-size: 12px; }
+  .stack {
+    min-height: 70px; padding: 10px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .stack.dragover { outline: 2px dashed #3d8a66; outline-offset: -6px; border-radius: 8px; }
+  .card {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: #2d2d33; border: 1px solid #444; border-radius: 6px; cursor: grab;
+  }
+  .card.from-catalog { border-style: dashed; }
+  .card .name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .card .desc { display: block; font-size: 12px; color: #888; }
+  .card .remove {
+    border: none; background: none; color: #888;
+    padding: 0 4px; font-size: 16px; line-height: 1;
+  }
+  .card .remove:hover { color: #ff8888; }
+  .hint { font-size: 12px; color: #666; margin: 6px 0; }
+  #error-page { padding: 40px; text-align: center; color: #ffaaaa; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Taskband configurator</h1>
+  <button id="discard" disabled>Discard</button>
+  <button id="apply" disabled>Apply</button>
+</header>
+<div id="banner"><span id="banner-text"></span><button id="banner-reload">Reload</button></div>
+<main>
+  <aside id="palette"></aside>
+  <section id="board"></section>
+</main>
+<script>
+"use strict";
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const api = path => `${path}?token=${encodeURIComponent(TOKEN)}`;
+
+let state = null;              // last /api/state payload
+let columns = new Map();       // monitor index (number) -> array of module names
+let dirty = false;
+
+const el = id => document.getElementById(id);
+
+function setDirty(d) {
+  dirty = d;
+  el("apply").disabled = !d;
+  el("discard").disabled = !d;
+}
+
+function showBanner(text, offerReload) {
+  el("banner-text").textContent = text;
+  el("banner-reload").style.display = offerReload ? "" : "none";
+  el("banner").classList.add("show");
+}
+
+function hideBanner() { el("banner").classList.remove("show"); }
+
+function isFromCatalog(name) {
+  return !state.defined.includes(name) && state.catalog.some(c => c.name === name);
+}
+
+function descriptionOf(name) {
+  const entry = state.catalog.find(c => c.name === name);
+  return entry ? entry.description : "";
+}
+
+function makeCard(name, drag, onRemove) {
+  const card = document.createElement("div");
+  card.className = "card" + (isFromCatalog(name) ? " from-catalog" : "");
+  card.draggable = true;
+  const label = document.createElement("span");
+  label.className = "name";
+  label.textContent = name;
+  const desc = descriptionOf(name);
+  if (desc) {
+    const d = document.createElement("span");
+    d.className = "desc";
+    d.textContent = desc;
+    label.appendChild(d);
+  }
+  card.appendChild(label);
+  if (onRemove) {
+    const x = document.createElement("button");
+    x.className = "remove";
+    x.textContent = "×";
+    x.title = "Remove from this bar";
+    x.addEventListener("click", onRemove);
+    card.appendChild(x);
+  }
+  card.addEventListener("dragstart", e => {
+    e.dataTransfer.setData("text/plain", JSON.stringify(drag));
+    e.dataTransfer.effectAllowed = "move";
+  });
+  return card;
+}
+
+function renderPalette() {
+  const palette = el("palette");
+  palette.replaceChildren();
+
+  const group = (title, names, hint) => {
+    const h = document.createElement("h2");
+    h.textContent = title;
+    palette.appendChild(h);
+    if (!names.length) {
+      const p = document.createElement("p");
+      p.className = "hint";
+      p.textContent = hint;
+      palette.appendChild(p);
+      return;
+    }
+    for (const name of names) {
+      palette.appendChild(makeCard(name, { from: "palette", name }, null));
+    }
+  };
+
+  group("Your modules", state.defined, "No modules defined in config.json yet.");
+  group("Catalog", state.catalog.map(c => c.name),
+        "Every catalog module is already in your config.");
+  const tip = document.createElement("p");
+  tip.className = "hint";
+  tip.textContent = "Drag a module into a monitor column. Top of a column is the left edge of the bar.";
+  palette.appendChild(tip);
+}
+
+function insertionIndex(stack, y) {
+  const cards = [...stack.querySelectorAll(".card")];
+  for (let k = 0; k < cards.length; k++) {
+    const r = cards[k].getBoundingClientRect();
+    if (y < r.top + r.height / 2) return k;
+  }
+  return cards.length;
+}
+
+function handleDrop(monitorIndex, e) {
+  e.preventDefault();
+  const stack = e.currentTarget;
+  stack.classList.remove("dragover");
+  let data;
+  try { data = JSON.parse(e.dataTransfer.getData("text/plain")); }
+  catch { return; }
+  const target = columns.get(monitorIndex);
+  let insertAt = insertionIndex(stack, e.clientY);
+  if (data.from === "palette") {
+    target.splice(insertAt, 0, data.name);
+  } else if (data.from === "column") {
+    const source = columns.get(data.monitor);
+    if (!source || data.pos >= source.length) return;
+    const [name] = source.splice(data.pos, 1);
+    if (source === target && data.pos < insertAt) insertAt -= 1;
+    target.splice(insertAt, 0, name);
+  } else {
+    return;
+  }
+  setDirty(true);
+  render();
+}
+
+function renderBoard() {
+  const board = el("board");
+  board.replaceChildren();
+  for (const monitor of state.monitors) {
+    const column = document.createElement("div");
+    column.className = "column";
+    const title = document.createElement("h3");
+    // Device names come as \\.\DISPLAY1; the prefix is noise on a label.
+    const name = (monitor.name || "").replace(/^\\\\\.\\/, "");
+    title.textContent =
+      `Monitor ${monitor.index}` +
+      (name ? ` · ${name}` : "") +
+      (monitor.primary ? " · primary" : "") +
+      ` · ${monitor.width}×${monitor.height}`;
+    if (!monitor.hasTaskbar) {
+      const warn = document.createElement("span");
+      warn.className = "warn";
+      warn.textContent = " · no taskbar";
+      warn.title = "Enable 'Show my taskbar on all displays' in Windows settings.";
+      title.appendChild(warn);
+    }
+    column.appendChild(title);
+
+    const stack = document.createElement("div");
+    stack.className = "stack";
+    const mods = columns.get(monitor.index);
+    mods.forEach((name, pos) => {
+      const card = makeCard(
+        name,
+        { from: "column", monitor: monitor.index, pos },
+        () => { mods.splice(pos, 1); setDirty(true); render(); }
+      );
+      stack.appendChild(card);
+    });
+    stack.addEventListener("dragover", e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      stack.classList.add("dragover");
+    });
+    stack.addEventListener("dragleave", () => stack.classList.remove("dragover"));
+    stack.addEventListener("drop", e => handleDrop(monitor.index, e));
+    column.appendChild(stack);
+    board.appendChild(column);
+  }
+}
+
+function render() { renderPalette(); renderBoard(); }
+
+async function load() {
+  hideBanner();
+  let r;
+  try { r = await fetch(api("/api/state")); }
+  catch { showBanner("Taskband is not reachable. Is it still running?", true); return; }
+  state = await r.json();
+  if (state.error) {
+    el("board").innerHTML =
+      `<div id="error-page">config.json has a syntax error, fix it in an editor first:<br><code></code></div>`;
+    el("board").querySelector("code").textContent = state.error;
+    el("palette").replaceChildren();
+    setDirty(false);
+    return;
+  }
+  columns = new Map(state.monitors.map(m => [m.index, [...m.modules]]));
+  setDirty(false);
+  render();
+}
+
+async function apply() {
+  const monitors = {};
+  for (const [index, mods] of columns) monitors[index] = mods;
+  const used = new Set([].concat(...columns.values()));
+  const add = state.catalog
+    .map(c => c.name)
+    .filter(name => used.has(name) && !state.defined.includes(name));
+
+  let r, body;
+  try {
+    r = await fetch(api("/api/apply"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hash: state.hash, monitors, add }),
+    });
+    body = await r.json();
+  } catch {
+    showBanner("Apply failed: Taskband is not reachable.", true);
+    return;
+  }
+  if (r.status === 409) {
+    showBanner("config.json changed on disk since this page loaded. Reload to pick up the new state.", true);
+    return;
+  }
+  if (!r.ok || body.error) {
+    showBanner(`Apply failed: ${body.error || r.status}`, false);
+    return;
+  }
+  await load();
+}
+
+el("apply").addEventListener("click", apply);
+el("discard").addEventListener("click", load);
+el("banner-reload").addEventListener("click", load);
+load();
+</script>
+</body>
+</html>

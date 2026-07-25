@@ -41,6 +41,7 @@ const ID_RELOAD: usize = 1;
 const ID_EDIT: usize = 2;
 const ID_STARTUP: usize = 3;
 const ID_QUIT: usize = 4;
+const ID_CONFIGURE: usize = 5;
 
 const RUN_SUBKEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 const RUN_VALUE: PCWSTR = w!("Taskband");
@@ -157,6 +158,7 @@ unsafe fn show_menu(hwnd: HWND) {
     };
     let _ = AppendMenuW(menu, MF_STRING, ID_RELOAD, w!("Reload config"));
     let _ = AppendMenuW(menu, MF_STRING, ID_EDIT, w!("Edit config"));
+    let _ = AppendMenuW(menu, MF_STRING, ID_CONFIGURE, w!("Configure..."));
     let startup = MF_STRING
         | if startup_enabled() {
             MF_CHECKED
@@ -193,6 +195,9 @@ unsafe fn show_menu(hwnd: HWND) {
             );
         }
         ID_EDIT => edit_config(hwnd, &state.path),
+        ID_CONFIGURE => {
+            crate::server::open_configurator(&state.path, state.driver.0 as isize);
+        }
         ID_STARTUP => {
             let _ = set_startup(!startup_enabled());
         }

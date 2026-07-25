@@ -2,11 +2,14 @@
 // debug builds keep the console so startup diagnostics are visible.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod catalog;
 mod config;
 mod css;
+mod editor;
 mod layout;
 mod markup;
 mod plugin;
+mod server;
 mod taskbar;
 mod tray;
 mod window;
