@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 use windows::core::{w, Result, PCWSTR};
 use windows::Win32::Foundation::{ERROR_SUCCESS, HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::Registry::{
-    RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ,
+    RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_DWORD, REG_SZ,
+    RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
 };
 use windows::Win32::UI::Shell::{
     ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
@@ -45,6 +46,9 @@ const ID_CONFIGURE: usize = 5;
 
 const RUN_SUBKEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 const RUN_VALUE: PCWSTR = w!("Taskband");
+
+const APP_SUBKEY: PCWSTR = w!("Software\\Taskband");
+const MARKER_VALUE: PCWSTR = w!("StartupConfigured");
 
 /// Per-window tray state, owned via `GWLP_USERDATA`.
 struct TrayState {
@@ -268,9 +272,109 @@ pub fn set_startup(enable: bool) -> bool {
     }
 }
 
+/// Enable "Start at login" on the very first launch, once, so the bar
+/// survives a reboot by default while a later manual uncheck sticks. Also
+/// repoints an enabled entry after the exe moves (versioned release folders).
+/// No-op in debug builds so `cargo run` never registers a target\debug exe.
+pub fn ensure_default_startup() {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    apply_default_startup();
+}
+
+/// The debug-guard-free body of `ensure_default_startup`, testable from the
+/// (debug) test build.
+fn apply_default_startup() {
+    if !startup_configured() {
+        // First run: enable, then record the decision even if enabling
+        // failed (e.g. policy blocks Run-key writes) so we never retry.
+        let _ = set_startup(true);
+        mark_startup_configured();
+        return;
+    }
+    // Startup stays whatever the user chose; only refresh a stale path.
+    let Some(cmd) = startup_command() else {
+        return;
+    };
+    let exe = std::env::current_exe().unwrap_or_default();
+    if cmd != format!("\"{}\"", exe.display()) {
+        let _ = set_startup(true);
+    }
+}
+
+/// Whether the one-time `StartupConfigured` marker exists under our app key.
+fn startup_configured() -> bool {
+    unsafe {
+        let mut size = 0u32;
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            APP_SUBKEY,
+            MARKER_VALUE,
+            RRF_RT_REG_DWORD,
+            None,
+            None,
+            Some(&mut size),
+        ) == ERROR_SUCCESS
+    }
+}
+
+/// Write the one-time marker recording that startup was configured.
+fn mark_startup_configured() {
+    unsafe {
+        let one = 1u32;
+        let _ = RegSetKeyValueW(
+            HKEY_CURRENT_USER,
+            APP_SUBKEY,
+            MARKER_VALUE,
+            REG_DWORD.0,
+            Some(&one as *const u32 as *const c_void),
+            size_of::<u32>() as u32,
+        );
+    }
+}
+
+/// The current Run-entry command line, or `None` if absent or unreadable.
+fn startup_command() -> Option<String> {
+    unsafe {
+        let mut size = 0u32;
+        if RegGetValueW(
+            HKEY_CURRENT_USER,
+            RUN_SUBKEY,
+            RUN_VALUE,
+            RRF_RT_REG_SZ,
+            None,
+            None,
+            Some(&mut size),
+        ) != ERROR_SUCCESS
+        {
+            return None;
+        }
+        let mut buf = vec![0u16; size.div_ceil(2) as usize];
+        if RegGetValueW(
+            HKEY_CURRENT_USER,
+            RUN_SUBKEY,
+            RUN_VALUE,
+            RRF_RT_REG_SZ,
+            None,
+            Some(buf.as_mut_ptr() as *mut c_void),
+            Some(&mut size),
+        ) != ERROR_SUCCESS
+        {
+            return None;
+        }
+        let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        Some(String::from_utf16_lossy(&buf[..len]))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Both ignored tests mutate the same real HKCU values, so they must not
+    // run on parallel test threads.
+    static REG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     // Exercises the real HKCU `Run` key, so it's ignored by default. Run with:
     //   cargo test -- --ignored startup_roundtrip
@@ -278,7 +382,8 @@ mod tests {
     #[test]
     #[ignore]
     fn startup_roundtrip() {
-        let was = startup_enabled();
+        let _guard = REG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_cmd = startup_command();
 
         assert!(set_startup(true), "enabling should succeed");
         assert!(startup_enabled(), "value should read back as present");
@@ -286,8 +391,88 @@ mod tests {
         assert!(set_startup(false), "disabling should succeed");
         assert!(!startup_enabled(), "value should be gone after disable");
 
-        if was {
-            let _ = set_startup(true);
+        // Restore the exact prior command, not `set_startup(true)`: that would
+        // repoint the entry at this test binary.
+        if let Some(cmd) = prior_cmd {
+            restore_run_entry(&cmd);
+        }
+    }
+
+    /// Write `cmd` back to the Run entry verbatim.
+    fn restore_run_entry(cmd: &str) {
+        let data: Vec<u16> = cmd.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            let _ = RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                RUN_SUBKEY,
+                RUN_VALUE,
+                REG_SZ.0,
+                Some(data.as_ptr() as *const c_void),
+                (data.len() * 2) as u32,
+            );
+        }
+    }
+
+    /// Exercises the real HKCU hive like `startup_roundtrip`; run with:
+    ///   cargo test -- --ignored default_startup
+    /// Restores the prior Run entry and marker on exit.
+    #[test]
+    #[ignore]
+    fn default_startup_first_run_uncheck_and_refresh() {
+        let _guard = REG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_cmd = startup_command();
+        let prior_marker = startup_configured();
+
+        // Clean slate: no Run entry, no marker.
+        let _ = set_startup(false);
+        unsafe {
+            let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, APP_SUBKEY, MARKER_VALUE);
+        }
+
+        // First run: enables startup and records the decision.
+        apply_default_startup();
+        assert!(startup_enabled(), "first run should enable startup");
+        assert!(startup_configured(), "first run should write the marker");
+
+        // User unchecks; later launches must not re-enable.
+        let _ = set_startup(false);
+        apply_default_startup();
+        assert!(!startup_enabled(), "unchecking must stick across launches");
+
+        // Stale path: an enabled entry pointing elsewhere gets rewritten.
+        let stale: Vec<u16> = "\"C:\\old\\taskband.exe\""
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        unsafe {
+            let _ = RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                RUN_SUBKEY,
+                RUN_VALUE,
+                REG_SZ.0,
+                Some(stale.as_ptr() as *const c_void),
+                (stale.len() * 2) as u32,
+            );
+        }
+        apply_default_startup();
+        let exe = std::env::current_exe().unwrap();
+        assert_eq!(
+            startup_command().as_deref(),
+            Some(format!("\"{}\"", exe.display()).as_str()),
+            "stale Run entry should be refreshed to the current exe"
+        );
+
+        // Restore prior state.
+        match prior_cmd {
+            Some(cmd) => restore_run_entry(&cmd),
+            None => {
+                let _ = set_startup(false);
+            }
+        }
+        if !prior_marker {
+            unsafe {
+                let _ = RegDeleteKeyValueW(HKEY_CURRENT_USER, APP_SUBKEY, MARKER_VALUE);
+            }
         }
     }
 }

@@ -78,6 +78,7 @@ fn main() -> windows::core::Result<()> {
     let app = window::App::new(build.styles, build.class_maps, rx, path.clone(), bars);
     window::install(app, driver);
     tray::install(instance, driver, path)?;
+    tray::ensure_default_startup();
     println!(
         "Taskband embedded on {bar_count} monitor(s), {slot_count} module slot(s). Edit config.json to reload live."
     );
