@@ -50,7 +50,7 @@ Add to your `config.json` (the Taskband one, beside `Taskband.exe`):
     "modules": ["claude", "clock"],
 
     "claude": {
-        "exec": "node \"C:\\path\\to\\taskband\\examples\\claude-usage\\claude-usage.js\"",
+        "exec": "node \"C:\\path\\to\\taskband\\modules\\claude-usage\\claude-usage.js\"",
         "interval": 60,
         "css": { "font-family": "Consolas", "font-size": "11px", "text-align": "left" }
     }

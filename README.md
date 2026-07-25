@@ -61,19 +61,19 @@ The binary lands at `target/release/Taskband.exe`.
 ## Previews
 
 Your Claude Code usage on the taskbar: the 5-hour session and 7-day limits,
-with a countdown to when each resets ([claude-usage](examples/claude-usage/)):
+with a countdown to when each resets ([claude-usage](modules/claude-usage/)):
 
-<img src="examples/claude-usage/claude-usage-preview.png" alt="Claude usage module on the taskbar: two progress bars for the 5-hour and 7-day windows, with percentages and reset countdowns">
+<img src="modules/claude-usage/claude-usage-preview.png" alt="Claude usage module on the taskbar: two progress bars for the 5-hour and 7-day windows, with percentages and reset countdowns">
 
 Physical memory in use, with the bar colored by usage level
-([memory](examples/memory/)):
+([memory](modules/memory/)):
 
-<img src="examples/memory/memory-preview.png" alt="Memory module on the taskbar: a usage bar over the percentage and gigabytes used">
+<img src="modules/memory/memory-preview.png" alt="Memory module on the taskbar: a usage bar over the percentage and gigabytes used">
 
 Disk usage for every fixed drive, each bar colored by its own usage level
-([disk-space](examples/disk-space/)):
+([disk-space](modules/disk-space/)):
 
-<img src="examples/disk-space/disk-space-preview.png" alt="Disk space module on the taskbar: a usage bar per drive, with the percentage and gigabytes used under each">
+<img src="modules/disk-space/disk-space-preview.png" alt="Disk space module on the taskbar: a usage bar per drive, with the percentage and gigabytes used under each">
 
 ## Configuration
 
@@ -204,17 +204,17 @@ taskbar on all displays** enabled. Windows 11 paints its own clock on
 secondary taskbars; `"secondary-clock-reserve"` (default `100`) reserves that
 many pixels at the right edge so modules don't overlap it.
 
-## Examples
+## Modules
 
-The [`examples/`](examples/) folder has ready-to-use modules you can point your
+The [`modules/`](modules/) folder has ready-to-use modules you can point your
 config at. Each one is a single folder you can copy anywhere; the
 [Previews](#previews) above show them on a real taskbar.
 
-- [claude-usage](examples/claude-usage/): Claude 5-hour and 7-day usage,
+- [claude-usage](modules/claude-usage/): Claude 5-hour and 7-day usage,
   with progress bars and reset countdowns
-- [disk-space](examples/disk-space/): a usage bar for every fixed drive,
+- [disk-space](modules/disk-space/): a usage bar for every fixed drive,
   colored by usage level
-- [memory](examples/memory/): physical memory in use, with the bar colored
+- [memory](modules/memory/): physical memory in use, with the bar colored
   by usage level
 
 ## Building from source

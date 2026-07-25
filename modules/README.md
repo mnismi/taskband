@@ -1,4 +1,4 @@
-# Example modules
+# Modules
 
 Ready-to-use Taskband modules. Each folder is self-contained: point a module's
 `exec` at the script inside it.
@@ -28,7 +28,7 @@ Add a module definition to your Taskband `config.json` and list its name in
     "modules": ["memory", "clock"],
 
     "memory": {
-        "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\taskband\\examples\\memory\\memory.ps1\"",
+        "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\taskband\\modules\\memory\\memory.ps1\"",
         "interval": 5
     }
 }

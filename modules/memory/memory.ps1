@@ -9,7 +9,7 @@
 #
 # config.json (plain output):
 #   "memory": {
-#       "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\examples\\memory\\memory.ps1\"",
+#       "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\modules\\memory\\memory.ps1\"",
 #       "interval": 5,
 #       "css": { "font-family": "Consolas", "text-align": "left" }
 #   }
@@ -18,7 +18,7 @@
 # level (green below 50%, yellow from 50%, orange from 75%, red from 90%);
 # everything else renders in the module's normal color:
 #   "memory": {
-#       "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\examples\\memory\\memory.ps1\" -Styled",
+#       "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\modules\\memory\\memory.ps1\" -Styled",
 #       "interval": 5,
 #       "output": "html",
 #       "css": { "font-family": "Consolas", "text-align": "left" },
@@ -34,7 +34,7 @@ param([switch]$Styled)
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-# Same glyphs as examples/claude-usage/claude-usage.js, written as codepoints so
+# Same glyphs as modules/claude-usage/claude-usage.js, written as codepoints so
 # that re-encoding this file cannot corrupt them. Every glyph must exist in
 # Consolas and Cascadia Mono with the standard monospace advance, or the bar's
 # width changes with its fill level (the old fullwidth glyphs came from

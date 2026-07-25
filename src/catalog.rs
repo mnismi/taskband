@@ -1,6 +1,6 @@
 //! The built-in module catalog: ready-made modules the configurator can copy
 //! into a user's config. Entries with a script payload embed it at compile
-//! time (from `examples/`) and write it beside `config.json` on first use.
+//! time (from `modules/`) and write it beside `config.json` on first use.
 
 use std::path::{Path, PathBuf};
 
@@ -32,7 +32,7 @@ pub const ENTRIES: &[CatalogEntry] = &[
         description: "Physical memory in use, bar colored by level",
         payload: Some(Payload {
             file: "memory.ps1",
-            contents: include_str!("../examples/memory/memory.ps1"),
+            contents: include_str!("../modules/memory/memory.ps1"),
         }),
     },
     CatalogEntry {
@@ -40,7 +40,7 @@ pub const ENTRIES: &[CatalogEntry] = &[
         description: "A usage bar per fixed drive",
         payload: Some(Payload {
             file: "disk-space.ps1",
-            contents: include_str!("../examples/disk-space/disk-space.ps1"),
+            contents: include_str!("../modules/disk-space/disk-space.ps1"),
         }),
     },
 ];

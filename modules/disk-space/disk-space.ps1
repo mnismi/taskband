@@ -11,7 +11,7 @@
 #
 # config.json (plain output):
 #   "disk": {
-#       "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\examples\\disk-space\\disk-space.ps1\"",
+#       "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\modules\\disk-space\\disk-space.ps1\"",
 #       "interval": 30,
 #       "css": { "font-family": "Consolas", "text-align": "left" }
 #   }
@@ -20,7 +20,7 @@
 # by its own usage level (green below 50%, yellow from 50%, orange from 75%,
 # red from 90%); everything else renders in the module's normal color:
 #   "disk": {
-#       "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\examples\\disk-space\\disk-space.ps1\" -Styled",
+#       "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\path\\to\\modules\\disk-space\\disk-space.ps1\" -Styled",
 #       "interval": 30,
 #       "output": "html",
 #       "css": { "font-family": "Consolas", "text-align": "left" },
@@ -36,7 +36,7 @@ param([switch]$Styled)
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-# Same glyphs as examples/memory/memory.ps1, written as codepoints so that
+# Same glyphs as modules/memory/memory.ps1, written as codepoints so that
 # re-encoding this file cannot corrupt them. Every glyph must exist in
 # Consolas and Cascadia Mono with the standard monospace advance, or a bar's
 # width changes with its fill level.
