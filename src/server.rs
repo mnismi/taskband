@@ -90,8 +90,8 @@ pub fn apply_to_text(
     let mut out = text.to_string();
 
     for name in &req.add {
-        let entry = crate::catalog::find(name)
-            .ok_or_else(|| format!("unknown catalog module '{name}'"))?;
+        let entry =
+            crate::catalog::find(name).ok_or_else(|| format!("unknown catalog module '{name}'"))?;
         let script = crate::catalog::materialize(entry, config_dir)?;
         let body = crate::catalog::definition_body(entry, &indent, script.as_deref());
         out = crate::editor::append_module(&out, name, &body)?;
@@ -240,7 +240,10 @@ fn handle_apply(request: &mut tiny_http::Request, path: &Path, driver: isize) ->
     let req: ApplyRequest = match serde_json::from_reader(request.as_reader()) {
         Ok(r) => r,
         Err(e) => {
-            return json_response(400, serde_json::json!({ "error": format!("bad request: {e}") }))
+            return json_response(
+                400,
+                serde_json::json!({ "error": format!("bad request: {e}") }),
+            )
         }
     };
 
@@ -313,7 +316,10 @@ mod tests {
         let v = state_json(text, &[snapshot(0, true), snapshot(1, false)]);
         assert!(v["error"].is_null());
         assert_eq!(v["hash"], crate::editor::content_hash(text));
-        assert_eq!(v["monitors"][0]["modules"], serde_json::json!(["cpu", "clock"]));
+        assert_eq!(
+            v["monitors"][0]["modules"],
+            serde_json::json!(["cpu", "clock"])
+        );
         assert_eq!(v["monitors"][1]["modules"], serde_json::json!([]));
         // defined is sorted; catalog excludes already-defined names
         assert_eq!(v["defined"], serde_json::json!(["clock", "cpu"]));

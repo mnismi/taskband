@@ -140,7 +140,8 @@ pub fn top_level_spans(text: &str) -> Result<(Vec<KeySpan>, usize, usize), Strin
             k
         } else {
             let s = i;
-            while i < b.len() && (b[i].is_ascii_alphanumeric() || matches!(b[i], b'_' | b'$' | b'-'))
+            while i < b.len()
+                && (b[i].is_ascii_alphanumeric() || matches!(b[i], b'_' | b'$' | b'-'))
             {
                 i += 1;
             }
@@ -261,10 +262,7 @@ fn remove_span(text: &str, span: &KeySpan) -> String {
 
 /// Replace (or insert) the top-level `"monitors"` value and drop a legacy
 /// top-level `"modules"` key. Everything else is preserved byte-for-byte.
-pub fn set_monitors(
-    text: &str,
-    monitors: &BTreeMap<usize, Vec<String>>,
-) -> Result<String, String> {
+pub fn set_monitors(text: &str, monitors: &BTreeMap<usize, Vec<String>>) -> Result<String, String> {
     let indent = detect_indent(text);
     let value = format_monitors(monitors, &indent);
     let (spans, open, _close) = top_level_spans(text)?;
@@ -334,7 +332,10 @@ mod tests {
         let keys: Vec<&str> = spans.iter().map(|s| s.key.as_str()).collect();
         assert_eq!(keys, vec!["a", "b", "c"]);
         assert_eq!(&text[spans[1].value_start..spans[1].end], "[1, 2]");
-        assert_eq!(&text[spans[2].value_start..spans[2].end], r##"{ "x": "y" }"##);
+        assert_eq!(
+            &text[spans[2].value_start..spans[2].end],
+            r##"{ "x": "y" }"##
+        );
     }
 
     #[test]
