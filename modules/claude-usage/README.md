@@ -15,6 +15,17 @@ A window with no active countdown shows `idle` in place of the reset time. The
 API reports this with a null `resets_at`, typically for the 5-hour window when
 no session is running.
 
+## This uses an unofficial endpoint
+
+This module does not use Anthropic's official API. It calls claude.ai's
+internal web endpoint (`/api/organizations/<orgId>/usage`) with your own
+browser session cookie, the same request the claude.ai page makes for itself.
+Automating claude.ai outside its own interfaces may conflict with Anthropic's
+consumer terms of service. The module is read-only, touches only your own
+account, and makes one request per interval, but use it at your own risk: the
+endpoint can change or disappear without notice, and the plausible worst case
+is your session being invalidated or your account flagged.
+
 ## Requirements
 
 Node.js 18 or newer, for the built-in `fetch`. Nothing else: no dependencies, no
