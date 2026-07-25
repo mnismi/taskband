@@ -84,6 +84,33 @@ test('parseUsage rounds fractional utilization', () => {
     assert.equal(u.weeklyPct, 4);
 });
 
+test('parseUsage treats a null resets_at as an idle window', () => {
+    // Real shape from the API when no session is active: utilization is a
+    // number but resets_at is null because nothing is counting down.
+    const idleFive = JSON.stringify({
+        five_hour: { utilization: 0.0, resets_at: null, limit_dollars: null },
+        seven_day: { utilization: 65.0, resets_at: '2026-07-26T15:00:00.251333+00:00' },
+    });
+    const u = m.parseUsage(idleFive);
+    assert.equal(u.sessionPct, 0);
+    assert.equal(u.sessionResetsAt, null);
+    assert.equal(u.weeklyPct, 65);
+    assert.equal(u.weeklyResetsAt, Date.parse('2026-07-26T15:00:00.251333+00:00'));
+});
+
+test('formatLines marks a window with no reset time as idle', () => {
+    const usage = {
+        sessionPct: 0,
+        sessionResetsAt: null,
+        weeklyPct: 65,
+        weeklyResetsAt: 3000 * MIN, // 2d 2h
+    };
+    assert.deepEqual(m.formatLines(usage, 0), [
+        `5H ${bar(0)}   0% · idle`,
+        `7D ${bar(7)}  65% · 2d 2h`,
+    ]);
+});
+
 test('parseUsage names the window that is missing', () => {
     const noFive = JSON.stringify({
         seven_day: { utilization: 1, resets_at: '2026-07-26T14:59:59+00:00' },

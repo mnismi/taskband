@@ -11,6 +11,10 @@ when it resets.
 7D [▪▪▪▪▪▪····]  61% · 2d 2h
 ```
 
+A window with no active countdown shows `idle` in place of the reset time. The
+API reports this with a null `resets_at`, typically for the 5-hour window when
+no session is running.
+
 ## Requirements
 
 Node.js 18 or newer, for the built-in `fetch`. Nothing else: no dependencies, no

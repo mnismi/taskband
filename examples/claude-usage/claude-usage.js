@@ -50,11 +50,16 @@ function line(tag, pct, suffix) {
     return `${tag} ${progressBar(pct)} ${String(pct).padStart(3)}%${suffix}`;
 }
 
+/** Countdown suffix, or "idle" for a window with no reset in flight. */
+function suffix(nowMs, resetsAt) {
+    return ` ${DOT} ${resetsAt === null ? 'idle' : humanizeUntil(nowMs, resetsAt)}`;
+}
+
 /** The two bar lines, session over weekly. */
 function formatLines(usage, nowMs) {
     return [
-        line('5H', usage.sessionPct, ` ${DOT} ${humanizeUntil(nowMs, usage.sessionResetsAt)}`),
-        line('7D', usage.weeklyPct, ` ${DOT} ${humanizeUntil(nowMs, usage.weeklyResetsAt)}`),
+        line('5H', usage.sessionPct, suffix(nowMs, usage.sessionResetsAt)),
+        line('7D', usage.weeklyPct, suffix(nowMs, usage.weeklyResetsAt)),
     ];
 }
 
@@ -62,16 +67,25 @@ function formatLines(usage, nowMs) {
 // so this timeout is also the longest this module can stall the whole bar.
 const API_TIMEOUT_MS = 5_000;
 
-/** Pull `utilization` and `resets_at` out of one window, or say what is missing. */
+/**
+ * Pull `utilization` and `resets_at` out of one window, or say what is
+ * missing. An idle window has `resets_at: null` (nothing is counting down),
+ * which comes back as `at: null`.
+ */
 function readWindow(win, name) {
     const util = win && typeof win.utilization === 'number' ? win.utilization : null;
-    const resets = win && typeof win.resets_at === 'string' ? win.resets_at : null;
-    if (util === null || resets === null) {
-        throw new Error(`Response missing ${name} utilization/resets_at`);
+    if (util === null) {
+        throw new Error(`Response missing ${name} utilization`);
     }
-    const at = Date.parse(resets);
+    if (win.resets_at === null) {
+        return { pct: Math.round(util), at: null };
+    }
+    if (typeof win.resets_at !== 'string') {
+        throw new Error(`Response missing ${name} resets_at`);
+    }
+    const at = Date.parse(win.resets_at);
     if (Number.isNaN(at)) {
-        throw new Error(`bad timestamp ${resets}`);
+        throw new Error(`bad timestamp ${win.resets_at}`);
     }
     return { pct: Math.round(util), at };
 }
