@@ -217,7 +217,7 @@ unsafe fn show_menu(hwnd: HWND) {
 /// first if it doesn't exist yet (single-exe first run).
 unsafe fn edit_config(hwnd: HWND, path: &Path) {
     if !path.exists() {
-        let _ = std::fs::write(path, crate::config::DEFAULT_CONFIG);
+        crate::config::ensure_user_config(path);
     }
     let file: Vec<u16> = path
         .as_os_str()
