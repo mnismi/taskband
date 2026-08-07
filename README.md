@@ -77,17 +77,26 @@ Disk usage for every fixed drive, each bar colored by its own usage level
 
 ## Configuration
 
-Taskband looks for `config.json` next to `Taskband.exe` first, then in the
-current working directory. If neither exists it uses the built-in default;
-the tray's **Edit config** writes that default out beside the exe so you can
-customize it. The file is watched; saving it reloads the bar live.
+Taskband keeps its config in `%USERPROFILE%\Taskband\config.json`, created
+with a default on first run. A `config.json` next to `Taskband.exe` or in the
+working directory still wins if you have one, so portable installs keep
+working. The file is watched; saving it reloads the bar live.
+
+The same folder holds your modules:
+
+```
+C:\Users\<you>\Taskband\
+    config.json
+    modules\
+        memory\memory.ps1
+```
 
 For arranging modules without touching JSON, right-click the tray icon and
 choose **Configure...**: a drag-and-drop page opens in your browser with one
 column per monitor. Apply rewrites only the `monitors` section of
 `config.json` (your comments and styling stay put), and the bars update
-instantly. Modules added from the built-in catalog write their script to a
-`modules` folder next to `config.json`.
+instantly. Modules added from the catalog write their script to the `modules`
+folder next to `config.json`.
 
 <img src="assets/configuration-page.png" alt="Taskband configurator in the browser: a module palette on the left and one drag-and-drop column per monitor, each labeled with the monitor's name and resolution">
 
@@ -216,6 +225,34 @@ config at. Each one is a single folder you can copy anywhere; the
   colored by usage level
 - [memory](modules/memory/): physical memory in use, with the bar colored
   by usage level
+- [mouse-battery](modules/mouse-battery/): wireless mouse battery, read
+  straight off its 2.4G receiver (Attack Shark)
+
+### Adding a module to the configurator
+
+The **Configure...** palette lists the built-in modules plus anything in
+`%USERPROFILE%\Taskband\modules\`. A folder there joins the palette by
+carrying a `module.json`, which is a module definition plus a `description`
+for the palette:
+
+```json5
+{
+    "description": "Wireless mouse battery, off its 2.4G receiver",
+    "exec": "python \"${dir}\\mouse-battery.py\" --styled",
+    "interval": 60,
+    "output": "html",
+    "css": { "font-family": "Consolas", "text-align": "left" }
+}
+```
+
+`${dir}` stands for the module's own folder and is replaced with its real path
+when you add the module, so the manifest does not hard-code where you keep it.
+Every key other than `description` is copied into `config.json` as-is.
+
+To install one of the modules above, copy its folder into
+`%USERPROFILE%\Taskband\modules\` and reopen the configurator. A folder that
+shares a name with a built-in replaces it, so you can override a shipped
+module with your own.
 
 ## Building from source
 

@@ -535,6 +535,16 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// claude-usage ships a manifest without being built in. It is not
+    /// embedded in BUILTINS, so nothing else would catch a typo in it.
+    #[test]
+    fn shipped_non_builtin_manifest_parses() {
+        let text = include_str!("../modules/claude-usage/module.json");
+        let (description, manifest) = parse_manifest(text).expect("manifest parses");
+        assert!(!description.is_empty(), "needs a palette description");
+        assert!(manifest.contains_key("exec"));
+    }
+
     #[test]
     fn parse_manifest_rejects_bad_shapes() {
         assert!(parse_manifest("{ not json5").is_err());

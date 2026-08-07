@@ -325,7 +325,7 @@ mod tests {
         let v = state_json(
             text,
             &[snapshot(0, true), snapshot(1, false)],
-            Path::new("."),
+            Path::new("no-such-config-dir"),
         );
         assert!(v["error"].is_null());
         assert_eq!(v["hash"], crate::editor::content_hash(text));
@@ -354,7 +354,7 @@ mod tests {
         let v = state_json(
             text,
             &[snapshot(0, true), snapshot(1, false)],
-            Path::new("."),
+            Path::new("no-such-config-dir"),
         );
         assert_eq!(v["monitors"][0]["modules"], serde_json::json!([]));
         assert_eq!(v["monitors"][1]["modules"], serde_json::json!(["cpu"]));
@@ -362,7 +362,11 @@ mod tests {
 
     #[test]
     fn state_reports_parse_errors() {
-        let v = state_json("{ not json5", &[snapshot(0, true)], Path::new("."));
+        let v = state_json(
+            "{ not json5",
+            &[snapshot(0, true)],
+            Path::new("no-such-config-dir"),
+        );
         assert!(v["error"].is_string());
         assert!(v["hash"].is_string());
     }
@@ -387,7 +391,7 @@ mod tests {
             add: vec![],
         };
         // monitor 7 is not attached: its arrangement must survive
-        let out = apply_to_text(text, &req, &[0], Path::new(".")).unwrap();
+        let out = apply_to_text(text, &req, &[0], Path::new("no-such-config-dir")).unwrap();
         let cfg = crate::config::parse(&out).unwrap();
         assert_eq!(
             cfg.monitors.get("0").unwrap().module_order,
@@ -411,7 +415,7 @@ mod tests {
             ]),
             add: vec![],
         };
-        let out = apply_to_text(text, &req, &[0, 1], Path::new(".")).unwrap();
+        let out = apply_to_text(text, &req, &[0, 1], Path::new("no-such-config-dir")).unwrap();
         let cfg = crate::config::parse(&out).unwrap();
         assert!(cfg.monitors.get("0").unwrap().module_order.is_empty());
         assert_eq!(cfg.monitors.get("1").unwrap().module_order, vec!["cpu"]);
@@ -447,13 +451,13 @@ mod tests {
             monitors: HashMap::new(),
             add: vec!["ghost".to_string()],
         };
-        assert!(apply_to_text(text, &bad_add, &[], Path::new(".")).is_err());
+        assert!(apply_to_text(text, &bad_add, &[], Path::new("no-such-config-dir")).is_err());
 
         let bad_index = ApplyRequest {
             hash: String::new(),
             monitors: HashMap::from([("first".to_string(), vec![])]),
             add: vec![],
         };
-        assert!(apply_to_text(text, &bad_index, &[], Path::new(".")).is_err());
+        assert!(apply_to_text(text, &bad_index, &[], Path::new("no-such-config-dir")).is_err());
     }
 }

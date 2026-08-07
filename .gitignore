@@ -1,6 +1,7 @@
 /target
 /dist
 *.zip
+__pycache__/
 
 # Local design notes, kept out of the published repo
 /docs
