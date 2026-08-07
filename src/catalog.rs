@@ -117,9 +117,162 @@ pub fn definition_body(entry: &CatalogEntry, indent: &str, script: Option<&Path>
     }
 }
 
+/// Keys emitted first, in this order; any other key follows alphabetically.
+/// `serde_json::Map` is a `BTreeMap` here (no `preserve_order` feature), so
+/// without this the output would read `classes, css, exec, ...`.
+const KEY_ORDER: &[&str] = &["exec", "interval", "output", "css", "classes"];
+
+/// Longest line the emitter will produce before breaking an object across
+/// lines. Chosen so `css` stays inline and a four-color `classes` block does not.
+const MAX_WIDTH: usize = 80;
+
+fn ordered_keys(map: &serde_json::Map<String, serde_json::Value>) -> Vec<&String> {
+    let mut out: Vec<&String> = Vec::new();
+    for want in KEY_ORDER {
+        if let Some((key, _)) = map.get_key_value(*want) {
+            out.push(key);
+        }
+    }
+    let mut rest: Vec<&String> = map
+        .keys()
+        .filter(|k| !KEY_ORDER.contains(&k.as_str()))
+        .collect();
+    rest.sort();
+    out.extend(rest);
+    out
+}
+
+/// One-line form of a value. Scalars and arrays use serde's compact output
+/// (which escapes strings correctly); objects get `{ "k": v, "k": v }`.
+fn inline(value: &serde_json::Value) -> String {
+    let serde_json::Value::Object(map) = value else {
+        return value.to_string();
+    };
+    if map.is_empty() {
+        return "{}".to_string();
+    }
+    let parts: Vec<String> = ordered_keys(map)
+        .into_iter()
+        .map(|k| format!("\"{}\": {}", crate::editor::json_escape(k), inline(&map[k])))
+        .collect();
+    format!("{{ {} }}", parts.join(", "))
+}
+
+/// Render `value` as JSON5 text. `depth` is how many indent levels the value's
+/// own opening brace sits at. An object is emitted inline when that form fits
+/// in [`MAX_WIDTH`] columns, otherwise one key per line.
+fn render(value: &serde_json::Value, indent: &str, depth: usize) -> String {
+    let serde_json::Value::Object(map) = value else {
+        return value.to_string();
+    };
+    let one_line = inline(value);
+    if map.is_empty() || indent.len() * depth + one_line.len() <= MAX_WIDTH {
+        return one_line;
+    }
+    let pad = indent.repeat(depth + 1);
+    let close = indent.repeat(depth);
+    let parts: Vec<String> = ordered_keys(map)
+        .into_iter()
+        .map(|k| {
+            format!(
+                "{pad}\"{}\": {}",
+                crate::editor::json_escape(k),
+                render(&map[k], indent, depth + 1)
+            )
+        })
+        .collect();
+    format!("{{\n{}\n{close}}}", parts.join(",\n"))
+}
+
+/// A module definition object as JSON5 text, ready for
+/// `editor::append_module`: keys at two indent levels, closing brace at one.
+pub fn render_body(map: &serde_json::Map<String, serde_json::Value>, indent: &str) -> String {
+    render(&serde_json::Value::Object(map.clone()), indent, 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn map(text: &str) -> serde_json::Map<String, serde_json::Value> {
+        match json5::from_str::<serde_json::Value>(text).unwrap() {
+            serde_json::Value::Object(m) => m,
+            other => panic!("not an object: {other}"),
+        }
+    }
+
+    #[test]
+    fn render_body_orders_keys_and_inlines_short_objects() {
+        // authored alphabetically-last-first to prove the order is imposed
+        let m = map(r##"{
+                "css": { "font-family": "Consolas", "text-align": "left" },
+                "interval": 5,
+                "exec": "run.exe",
+                "output": "html"
+            }"##);
+        let out = render_body(&m, "    ");
+
+        let exec = out.find("\"exec\"").expect("exec present");
+        let interval = out.find("\"interval\"").expect("interval present");
+        let output = out.find("\"output\"").expect("output present");
+        let css = out.find("\"css\"").expect("css present");
+        assert!(
+            exec < interval && interval < output && output < css,
+            "got:\n{out}"
+        );
+
+        // a short nested object stays on one line
+        assert!(
+            out.contains(r#""css": { "font-family": "Consolas", "text-align": "left" }"#),
+            "css should be inline, got:\n{out}"
+        );
+        // top-level keys sit at two indents, the closing brace at one
+        assert!(out.starts_with("{\n        \"exec\""), "got:\n{out}");
+        assert!(out.ends_with("\n    }"), "got:\n{out}");
+    }
+
+    #[test]
+    fn render_body_expands_objects_that_do_not_fit() {
+        let m = map(r##"{
+                "exec": "run.exe",
+                "classes": {
+                    "green":  { "color": "#7fdbb0" },
+                    "yellow": { "color": "#f5c542" },
+                    "orange": { "color": "#ff9f43" },
+                    "red":    { "color": "#ff5555" }
+                }
+            }"##);
+        let out = render_body(&m, "    ");
+        // too wide for one line, so one key per line, but each leaf stays inline
+        assert!(out.contains("\"classes\": {\n"), "got:\n{out}");
+        assert!(
+            out.contains(r##""green": { "color": "#7fdbb0" }"##),
+            "got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn render_body_output_parses_as_a_module() {
+        let m = map(r##"{
+                "exec": "powershell -File \"C:\\a b\\x.ps1\"",
+                "interval": 30,
+                "output": "html",
+                "classes": { "red": { "color": "#ff5555" } }
+            }"##);
+        let body = render_body(&m, "    ");
+        let text = crate::editor::append_module("{}", "thing", &body).unwrap();
+        let cfg = crate::config::parse(&text).expect("emitted body parses");
+        let thing = cfg.modules.get("thing").expect("thing defined");
+        assert_eq!(thing.exec, r#"powershell -File "C:\a b\x.ps1""#);
+        assert_eq!(thing.interval, 30);
+        assert_eq!(thing.output, "html");
+        assert!(thing.classes.contains_key("red"));
+    }
+
+    #[test]
+    fn render_body_handles_an_empty_map() {
+        assert_eq!(render_body(&serde_json::Map::new(), "    "), "{}");
+    }
 
     /// Append every catalog entry to an empty config and check it parses into
     /// the expected definition. Pins the /api/apply contract for `add`.
