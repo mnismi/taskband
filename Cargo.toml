@@ -1,6 +1,6 @@
 [package]
 name = "taskband"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 description = "Highly customizable Windows taskbar with custom plugins"
 license = "MIT"

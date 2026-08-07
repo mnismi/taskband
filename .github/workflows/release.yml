@@ -26,7 +26,9 @@ jobs:
         run: |
           New-Item -ItemType Directory dist | Out-Null
           Copy-Item target/release/Taskband.exe dist/
-          Copy-Item config.json dist/
+          # No config.json beside the exe: it would win over
+          # %USERPROFILE%\Taskband\config.json and keep every install's config
+          # inside its download folder. The default is baked into the binary.
           Compress-Archive -Path dist/* -DestinationPath "taskband-${{ github.ref_name }}-x86_64-windows.zip"
 
       - name: Create GitHub Release
