@@ -31,7 +31,11 @@ pub struct ApplyRequest {
 /// The /api/state response: the parsed arrangement, defined module names, the
 /// catalog (minus already-defined names), and a content hash for conflict
 /// detection. A config that fails to parse reports `error` instead.
-pub fn state_json(config_text: &str, monitors: &[MonitorSnapshot]) -> serde_json::Value {
+pub fn state_json(
+    config_text: &str,
+    monitors: &[MonitorSnapshot],
+    config_dir: &Path,
+) -> serde_json::Value {
     let hash = crate::editor::content_hash(config_text);
     let cfg = match crate::config::parse(config_text) {
         Ok(cfg) => cfg,
@@ -53,9 +57,9 @@ pub fn state_json(config_text: &str, monitors: &[MonitorSnapshot]) -> serde_json
 
     let mut defined: Vec<&String> = cfg.modules.keys().collect();
     defined.sort();
-    let catalog: Vec<serde_json::Value> = crate::catalog::ENTRIES
-        .iter()
-        .filter(|e| !cfg.modules.contains_key(e.name))
+    let catalog: Vec<serde_json::Value> = crate::catalog::entries(config_dir)
+        .into_iter()
+        .filter(|e| !cfg.modules.contains_key(&e.name))
         .map(|e| serde_json::json!({ "name": e.name, "description": e.description }))
         .collect();
 
@@ -90,10 +94,10 @@ pub fn apply_to_text(
     let mut out = text.to_string();
 
     for name in &req.add {
-        let entry =
-            crate::catalog::find(name).ok_or_else(|| format!("unknown catalog module '{name}'"))?;
-        let script = crate::catalog::materialize(entry, config_dir)?;
-        let body = crate::catalog::definition_body(entry, &indent, script.as_deref());
+        let entry = crate::catalog::find(name, config_dir)
+            .ok_or_else(|| format!("unknown catalog module '{name}'"))?;
+        let dir = crate::catalog::materialize(&entry, config_dir)?;
+        let body = crate::catalog::definition_body(&entry, &indent, &dir);
         out = crate::editor::append_module(&out, name, &body)?;
     }
 
@@ -221,9 +225,14 @@ fn serve(server: tiny_http::Server, path: PathBuf, driver: isize, token: String)
             (tiny_http::Method::Get, "/") => {
                 response(200, "text/html; charset=utf-8", PAGE.to_string())
             }
-            (tiny_http::Method::Get, "/api/state") if authorized => {
-                json_response(200, state_json(&config_text(&path), &snapshots()))
-            }
+            (tiny_http::Method::Get, "/api/state") if authorized => json_response(
+                200,
+                state_json(
+                    &config_text(&path),
+                    &snapshots(),
+                    path.parent().unwrap_or_else(|| Path::new(".")),
+                ),
+            ),
             (tiny_http::Method::Post, "/api/apply") if authorized => {
                 handle_apply(&mut request, &path, driver)
             }
@@ -313,7 +322,11 @@ mod tests {
             "cpu": { "exec": "echo c" },
             "clock": { "exec": "echo t" }
         }"##;
-        let v = state_json(text, &[snapshot(0, true), snapshot(1, false)]);
+        let v = state_json(
+            text,
+            &[snapshot(0, true), snapshot(1, false)],
+            Path::new("."),
+        );
         assert!(v["error"].is_null());
         assert_eq!(v["hash"], crate::editor::content_hash(text));
         assert_eq!(
@@ -338,14 +351,18 @@ mod tests {
             "monitors": { "1": { "modules": ["cpu"] } },
             "cpu": { "exec": "echo c" }
         }"##;
-        let v = state_json(text, &[snapshot(0, true), snapshot(1, false)]);
+        let v = state_json(
+            text,
+            &[snapshot(0, true), snapshot(1, false)],
+            Path::new("."),
+        );
         assert_eq!(v["monitors"][0]["modules"], serde_json::json!([]));
         assert_eq!(v["monitors"][1]["modules"], serde_json::json!(["cpu"]));
     }
 
     #[test]
     fn state_reports_parse_errors() {
-        let v = state_json("{ not json5", &[snapshot(0, true)]);
+        let v = state_json("{ not json5", &[snapshot(0, true)], Path::new("."));
         assert!(v["error"].is_string());
         assert!(v["hash"].is_string());
     }

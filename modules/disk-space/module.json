@@ -1,0 +1,13 @@
+{
+    "description": "A usage bar per fixed drive",
+    "exec": "powershell -NoProfile -ExecutionPolicy Bypass -File \"${dir}\\disk-space.ps1\" -Styled",
+    "interval": 30,
+    "output": "html",
+    "css": { "font-family": "Consolas", "text-align": "left" },
+    "classes": {
+        "green": { "color": "#7fdbb0" },
+        "yellow": { "color": "#f5c542" },
+        "orange": { "color": "#ff9f43" },
+        "red": { "color": "#ff5555" }
+    }
+}

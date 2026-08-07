@@ -1,43 +1,60 @@
-//! The built-in module catalog: ready-made modules the configurator can copy
-//! into a user's config. Entries with a script payload embed it at compile
-//! time (from `modules/`) and write it beside `config.json` on first use.
+//! The module catalog: ready-made modules the configurator can copy into a
+//! user's config. Every entry is a manifest (a module definition plus a
+//! `description`). Built-ins embed theirs from `modules/` at compile time,
+//! along with any script they need, and write the script out beside
+//! `config.json` on first use.
 
 use std::path::{Path, PathBuf};
 
 /// A script file an entry needs on disk, embedded at compile time.
+#[derive(Clone)]
 pub struct Payload {
     pub file: &'static str,
     pub contents: &'static str,
 }
 
+/// A ready-made module the configurator can drop into a user's config.
 pub struct CatalogEntry {
-    pub name: &'static str,
-    pub description: &'static str,
+    pub name: String,
+    pub description: String,
+    /// The module definition, `description` removed and `${dir}` unexpanded.
+    pub manifest: serde_json::Map<String, serde_json::Value>,
+    /// Script to write out on first use. `None` for modules that need no file
+    /// on disk (inline `exec`) and for folder modules, whose files are there
+    /// already.
     pub payload: Option<Payload>,
 }
 
-pub const ENTRIES: &[CatalogEntry] = &[
-    CatalogEntry {
+/// A module shipped inside the binary: its manifest and script are embedded
+/// from the repo's `modules/` folder at compile time.
+struct Builtin {
+    name: &'static str,
+    manifest: &'static str,
+    payload: Option<Payload>,
+}
+
+const BUILTINS: &[Builtin] = &[
+    Builtin {
         name: "cpu",
-        description: "Processor load percentage",
+        manifest: include_str!("../modules/cpu/module.json"),
         payload: None,
     },
-    CatalogEntry {
+    Builtin {
         name: "clock",
-        description: "Date over a ticking time",
+        manifest: include_str!("../modules/clock/module.json"),
         payload: None,
     },
-    CatalogEntry {
+    Builtin {
         name: "memory",
-        description: "Physical memory in use, bar colored by level",
+        manifest: include_str!("../modules/memory/module.json"),
         payload: Some(Payload {
             file: "memory.ps1",
             contents: include_str!("../modules/memory/memory.ps1"),
         }),
     },
-    CatalogEntry {
+    Builtin {
         name: "disk-space",
-        description: "A usage bar per fixed drive",
+        manifest: include_str!("../modules/disk-space/module.json"),
         payload: Some(Payload {
             file: "disk-space.ps1",
             contents: include_str!("../modules/disk-space/disk-space.ps1"),
@@ -45,76 +62,84 @@ pub const ENTRIES: &[CatalogEntry] = &[
     },
 ];
 
-pub fn find(name: &str) -> Option<&'static CatalogEntry> {
-    ENTRIES.iter().find(|e| e.name == name)
+/// Parse manifest text into its palette description and the module definition
+/// that remains once `description` is removed. `exec` is required, because a
+/// definition without it cannot deserialize into a `ModuleConfig`.
+pub fn parse_manifest(
+    text: &str,
+) -> Result<(String, serde_json::Map<String, serde_json::Value>), String> {
+    let value: serde_json::Value = json5::from_str(text).map_err(|e| e.to_string())?;
+    let serde_json::Value::Object(mut map) = value else {
+        return Err("manifest is not a JSON object".to_string());
+    };
+    let description = match map.remove("description") {
+        Some(serde_json::Value::String(s)) => s,
+        Some(_) => return Err("\"description\" must be a string".to_string()),
+        None => String::new(),
+    };
+    match map.get("exec") {
+        Some(serde_json::Value::String(_)) => {}
+        Some(_) => return Err("\"exec\" must be a string".to_string()),
+        None => return Err("no \"exec\" key".to_string()),
+    }
+    Ok((description, map))
 }
 
-/// Write the entry's payload to `<config_dir>\modules\<name>\<file>` unless it
-/// already exists (a user's edits are never clobbered). Returns the script
-/// path, or `None` for payload-free entries.
-pub fn materialize(entry: &CatalogEntry, config_dir: &Path) -> Result<Option<PathBuf>, String> {
+/// The palette: every module the configurator can offer.
+pub fn entries(_config_dir: &Path) -> Vec<CatalogEntry> {
+    BUILTINS
+        .iter()
+        .filter_map(|b| match parse_manifest(b.manifest) {
+            Ok((description, manifest)) => Some(CatalogEntry {
+                name: b.name.to_string(),
+                description,
+                manifest,
+                payload: b.payload.clone(),
+            }),
+            Err(e) => {
+                // Unreachable in a correct build; a unit test pins every
+                // built-in manifest. Warn rather than panic so one bad
+                // manifest cannot take the app down.
+                eprintln!("Taskband: built-in module '{}': {e} (skipped)", b.name);
+                None
+            }
+        })
+        .collect()
+}
+
+pub fn find(name: &str, config_dir: &Path) -> Option<CatalogEntry> {
+    entries(config_dir).into_iter().find(|e| e.name == name)
+}
+
+/// The module's folder, `<config_dir>\modules\<name>`. An entry with a payload
+/// gets its folder created and the script written, unless a file is already
+/// there (a user's edits are never clobbered). An entry without one is not
+/// created: nothing needs to live there, and its `exec` does not use `${dir}`.
+pub fn materialize(entry: &CatalogEntry, config_dir: &Path) -> Result<PathBuf, String> {
+    let dir = config_dir.join("modules").join(&entry.name);
     let Some(payload) = &entry.payload else {
-        return Ok(None);
+        return Ok(dir);
     };
-    let dir = config_dir.join("modules").join(entry.name);
     std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
     let path = dir.join(payload.file);
     if !path.exists() {
         std::fs::write(&path, payload.contents)
             .map_err(|e| format!("writing {}: {e}", path.display()))?;
     }
-    Ok(Some(path))
-}
-
-/// The four-color classes block shared by the bar-drawing modules, as JSON5
-/// text at two levels of indentation.
-fn bar_classes(indent: &str) -> String {
-    let i2 = format!("{indent}{indent}");
-    let i3 = format!("{indent}{indent}{indent}");
-    format!(
-        "{{\n{i3}\"green\":  {{ \"color\": \"#7fdbb0\" }},\n{i3}\"yellow\": {{ \"color\": \"#f5c542\" }},\n{i3}\"orange\": {{ \"color\": \"#ff9f43\" }},\n{i3}\"red\":    {{ \"color\": \"#ff5555\" }}\n{i2}}}"
-    )
-}
-
-/// A styled bar module (memory, disk-space) definition body.
-fn bar_module_body(indent: &str, script: &Path, interval: u32) -> String {
-    let i2 = format!("{indent}{indent}");
-    let exec = crate::editor::json_escape(&format!(
-        "powershell -NoProfile -ExecutionPolicy Bypass -File \"{}\" -Styled",
-        script.display()
-    ));
-    let classes = bar_classes(indent);
-    format!(
-        "{{\n{i2}\"exec\": \"{exec}\",\n{i2}\"interval\": {interval},\n{i2}\"output\": \"html\",\n{i2}\"css\": {{ \"font-family\": \"Consolas\", \"text-align\": \"left\" }},\n{i2}\"classes\": {classes}\n{indent}}}"
-    )
+    Ok(dir)
 }
 
 /// The JSON5 object text for this entry's module definition, ready for
-/// `editor::append_module`. `script` is required for entries with a payload
-/// (the path `materialize` returned).
-pub fn definition_body(entry: &CatalogEntry, indent: &str, script: Option<&Path>) -> String {
-    let i2 = format!("{indent}{indent}");
-    match entry.name {
-        "cpu" => {
-            let exec = crate::editor::json_escape(
-                r#"powershell -NoProfile -Command "'CPU ' + (Get-CimInstance Win32_Processor).LoadPercentage + '%'""#,
-            );
-            format!(
-                "{{\n{i2}\"exec\": \"{exec}\",\n{i2}\"interval\": 2,\n{i2}\"css\": {{ \"color\": \"#7fdbb0\", \"font-weight\": \"bold\", \"font-size\": \"14px\" }}\n{indent}}}"
-            )
-        }
-        "clock" => {
-            let exec = crate::editor::json_escape(
-                r#"powershell -NoProfile -Command "(Get-Date).ToString('ddd dd MMM'); (Get-Date).ToString('HH:mm:ss')""#,
-            );
-            format!(
-                "{{\n{i2}\"exec\": \"{exec}\",\n{i2}\"interval\": 1,\n{i2}\"css\": {{ \"color\": \"#ffffff\", \"font-size\": \"14px\", \"text-align\": \"left\" }}\n{indent}}}"
-            )
-        }
-        "memory" => bar_module_body(indent, script.expect("memory has a payload"), 5),
-        "disk-space" => bar_module_body(indent, script.expect("disk-space has a payload"), 30),
-        other => unreachable!("no definition body for catalog entry '{other}'"),
+/// `editor::append_module`. `dir` is the module folder `materialize` returned;
+/// `${dir}` in `exec` expands to it, so the config ends up holding a plain
+/// absolute path with no runtime indirection.
+pub fn definition_body(entry: &CatalogEntry, indent: &str, dir: &Path) -> String {
+    let mut map = entry.manifest.clone();
+    if let Some(serde_json::Value::String(exec)) = map.get("exec") {
+        let expanded = exec.replace("${dir}", &dir.display().to_string());
+        map.insert("exec".to_string(), serde_json::Value::String(expanded));
     }
+    render_body(&map, indent)
 }
 
 /// Keys emitted first, in this order; any other key follows alphabetically.
@@ -193,6 +218,21 @@ pub fn render_body(map: &serde_json::Map<String, serde_json::Value>, indent: &st
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fresh empty temp directory, removed by the caller.
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "taskband-{tag}-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     fn map(text: &str) -> serde_json::Map<String, serde_json::Value> {
         match json5::from_str::<serde_json::Value>(text).unwrap() {
@@ -277,60 +317,91 @@ mod tests {
     /// Append every catalog entry to an empty config and check it parses into
     /// the expected definition. Pins the /api/apply contract for `add`.
     #[test]
-    fn every_entry_produces_a_valid_definition() {
+    fn every_builtin_manifest_parses_and_produces_a_valid_definition() {
+        let root = temp_dir("builtins");
         let indent = "    ";
-        let fake_script = std::path::Path::new(r"C:\tools\taskband\modules\x\x.ps1");
         let mut text = "{}".to_string();
-        for entry in ENTRIES {
-            let script = entry.payload.as_ref().map(|_| fake_script);
-            let body = definition_body(entry, indent, script);
-            text = crate::editor::append_module(&text, entry.name, &body).unwrap();
+
+        let all = entries(&root);
+        assert_eq!(all.len(), 4, "cpu, clock, memory, disk-space");
+        for entry in &all {
+            let dir = materialize(entry, &root).unwrap();
+            let body = definition_body(entry, indent, &dir);
+            text = crate::editor::append_module(&text, &entry.name, &body).unwrap();
         }
-        let cfg = crate::config::parse(&text).expect("all catalog definitions parse");
-        assert_eq!(cfg.modules.len(), ENTRIES.len());
+
+        let cfg = crate::config::parse(&text).expect("all built-in definitions parse");
+        assert_eq!(cfg.modules.len(), 4);
 
         let memory = cfg.modules.get("memory").expect("memory defined");
-        assert!(memory.exec.contains(r"C:\tools\taskband\modules\x\x.ps1"));
         assert!(memory.exec.contains("-Styled"));
+        assert!(!memory.exec.contains("${dir}"), "${{dir}} must be expanded");
+        assert!(memory
+            .exec
+            .contains(&root.join("modules").join("memory").display().to_string()));
         assert_eq!(memory.output, "html");
         assert!(memory.classes.contains_key("red"));
 
-        let disk = cfg.modules.get("disk-space").expect("disk-space defined");
-        assert_eq!(disk.interval, 30);
+        assert_eq!(cfg.modules.get("disk-space").unwrap().interval, 30);
 
         let cpu = cfg.modules.get("cpu").expect("cpu defined");
         assert!(cpu.exec.contains("LoadPercentage"));
         assert_eq!(cpu.interval, 2);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn find_is_exact() {
-        assert!(find("memory").is_some());
-        assert!(find("Memory").is_none());
-        assert!(find("ghost").is_none());
+        let root = temp_dir("find");
+        assert!(find("memory", &root).is_some());
+        assert!(find("Memory", &root).is_none());
+        assert!(find("ghost", &root).is_none());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn materialize_writes_once_and_never_overwrites() {
-        let dir =
-            std::env::temp_dir().join(format!("taskband-catalog-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let root = temp_dir("materialize");
 
-        let entry = find("memory").unwrap();
-        let path = materialize(entry, &dir).unwrap().expect("script path");
-        assert!(path.ends_with(r"modules\memory\memory.ps1"));
-        let written = std::fs::read_to_string(&path).unwrap();
-        assert!(written.contains("Taskband module"));
+        let entry = find("memory", &root).unwrap();
+        let dir = materialize(&entry, &root).unwrap();
+        assert!(dir.ends_with(r"modules\memory"));
+        let script = dir.join("memory.ps1");
+        assert!(std::fs::read_to_string(&script)
+            .unwrap()
+            .contains("Taskband module"));
 
         // a user-edited script is left alone
-        std::fs::write(&path, "user edited").unwrap();
-        materialize(entry, &dir).unwrap();
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "user edited");
+        std::fs::write(&script, "user edited").unwrap();
+        materialize(&entry, &root).unwrap();
+        assert_eq!(std::fs::read_to_string(&script).unwrap(), "user edited");
 
-        // entries without payloads materialize to nothing
-        assert!(materialize(find("cpu").unwrap(), &dir).unwrap().is_none());
+        // a payload-free entry still reports its folder, and writes nothing
+        let cpu_dir = materialize(&find("cpu", &root).unwrap(), &root).unwrap();
+        assert!(cpu_dir.ends_with(r"modules\cpu"));
+        assert!(!cpu_dir.exists(), "no payload means nothing to create");
 
-        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn parse_manifest_rejects_bad_shapes() {
+        assert!(parse_manifest("{ not json5").is_err());
+        assert!(parse_manifest("[1, 2]").is_err());
+        assert!(parse_manifest(r#"{ "interval": 5 }"#).is_err(), "no exec");
+        assert!(
+            parse_manifest(r#"{ "exec": 5 }"#).is_err(),
+            "exec not a string"
+        );
+
+        let (desc, m) =
+            parse_manifest(r#"{ "description": "d", "exec": "x", "interval": 9 }"#).unwrap();
+        assert_eq!(desc, "d");
+        assert!(!m.contains_key("description"), "description is stripped");
+        assert_eq!(m["interval"], serde_json::json!(9));
+
+        let (desc, _) = parse_manifest(r#"{ "exec": "x" }"#).unwrap();
+        assert_eq!(desc, "", "description is optional");
     }
 }

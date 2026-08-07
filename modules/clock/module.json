@@ -1,0 +1,6 @@
+{
+    "description": "Date over a ticking time",
+    "exec": "powershell -NoProfile -Command \"(Get-Date).ToString('ddd dd MMM'); (Get-Date).ToString('HH:mm:ss')\"",
+    "interval": 1,
+    "css": { "color": "#ffffff", "font-size": "14px", "text-align": "left" }
+}

@@ -1,0 +1,6 @@
+{
+    "description": "Processor load percentage",
+    "exec": "powershell -NoProfile -Command \"'CPU ' + (Get-CimInstance Win32_Processor).LoadPercentage + '%'\"",
+    "interval": 2,
+    "css": { "color": "#7fdbb0", "font-weight": "bold", "font-size": "14px" }
+}
