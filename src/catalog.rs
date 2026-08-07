@@ -85,9 +85,45 @@ pub fn parse_manifest(
     Ok((description, map))
 }
 
-/// The palette: every module the configurator can offer.
-pub fn entries(_config_dir: &Path) -> Vec<CatalogEntry> {
-    BUILTINS
+/// Folder modules: every directory under `<config_dir>\modules\` that carries a
+/// `module.json`. A directory without one is skipped silently, which is what a
+/// materialized built-in's script folder looks like. A manifest that will not
+/// parse warns and is skipped, so one bad module cannot empty the palette.
+fn scan(config_dir: &Path) -> Vec<CatalogEntry> {
+    let root = config_dir.join("modules");
+    let Ok(read) = std::fs::read_dir(&root) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for dir_entry in read.flatten() {
+        if !dir_entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let manifest_path = dir_entry.path().join("module.json");
+        let Ok(text) = std::fs::read_to_string(&manifest_path) else {
+            continue;
+        };
+        let name = dir_entry.file_name().to_string_lossy().into_owned();
+        match parse_manifest(&text) {
+            Ok((description, manifest)) => out.push(CatalogEntry {
+                name,
+                description,
+                manifest,
+                payload: None,
+            }),
+            Err(e) => eprintln!("Taskband: {}: {e} (skipped)", manifest_path.display()),
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// The palette: built-ins first in their shipped order, then folder modules
+/// sorted by name. A folder module whose name matches a built-in replaces it in
+/// place, so overriding a shipped module means dropping in a folder.
+pub fn entries(config_dir: &Path) -> Vec<CatalogEntry> {
+    let mut out: Vec<CatalogEntry> = BUILTINS
         .iter()
         .filter_map(|b| match parse_manifest(b.manifest) {
             Ok((description, manifest)) => Some(CatalogEntry {
@@ -104,7 +140,15 @@ pub fn entries(_config_dir: &Path) -> Vec<CatalogEntry> {
                 None
             }
         })
-        .collect()
+        .collect();
+
+    for found in scan(config_dir) {
+        match out.iter().position(|e| e.name == found.name) {
+            Some(i) => out[i] = found,
+            None => out.push(found),
+        }
+    }
+    out
 }
 
 pub fn find(name: &str, config_dir: &Path) -> Option<CatalogEntry> {
@@ -382,6 +426,112 @@ mod tests {
         assert!(cpu_dir.ends_with(r"modules\cpu"));
         assert!(!cpu_dir.exists(), "no payload means nothing to create");
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Write `<root>\modules\<name>\module.json` with the given text.
+    fn write_manifest(root: &std::path::Path, name: &str, text: &str) {
+        let dir = root.join("modules").join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("module.json"), text).unwrap();
+    }
+
+    #[test]
+    fn scan_picks_up_valid_manifests_and_skips_everything_else() {
+        let root = temp_dir("scan");
+        let modules = root.join("modules");
+
+        write_manifest(&root, "zebra", r#"{ "description": "Z", "exec": "z.exe" }"#);
+        write_manifest(&root, "alpha", r#"{ "description": "A", "exec": "a.exe" }"#);
+        write_manifest(&root, "broken", "{ not json5");
+        write_manifest(&root, "no-exec", r#"{ "description": "nope" }"#);
+        // a folder with no manifest (this is what a materialized built-in leaves)
+        std::fs::create_dir_all(modules.join("script-only")).unwrap();
+        std::fs::write(modules.join("script-only").join("x.ps1"), "# hi").unwrap();
+        // a loose file directly under modules\
+        std::fs::write(modules.join("stray.txt"), "ignore me").unwrap();
+
+        let names: Vec<String> = entries(&root).into_iter().map(|e| e.name).collect();
+        assert!(names.contains(&"alpha".to_string()));
+        assert!(names.contains(&"zebra".to_string()));
+        assert!(!names.contains(&"broken".to_string()));
+        assert!(!names.contains(&"no-exec".to_string()));
+        assert!(!names.contains(&"script-only".to_string()));
+        assert!(!names.contains(&"stray".to_string()));
+
+        // built-ins come first, folder modules after, sorted by name
+        assert_eq!(&names[..4], &["cpu", "clock", "memory", "disk-space"]);
+        assert_eq!(&names[4..], &["alpha", "zebra"]);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_folder_module_overrides_a_builtin_in_place() {
+        let root = temp_dir("override");
+        write_manifest(
+            &root,
+            "memory",
+            r#"{ "description": "mine", "exec": "custom.exe", "interval": 11 }"#,
+        );
+
+        let all = entries(&root);
+        let names: Vec<&str> = all.iter().map(|e| e.name.as_str()).collect();
+        assert_eq!(names, vec!["cpu", "clock", "memory", "disk-space"]);
+        assert_eq!(all.len(), 4, "override replaces, never appends");
+
+        let memory = find("memory", &root).unwrap();
+        assert_eq!(memory.description, "mine");
+        assert_eq!(memory.manifest["interval"], serde_json::json!(11));
+        assert!(
+            memory.payload.is_none(),
+            "the folder's files are already there"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_folder_module_round_trips_into_the_config() {
+        let root = temp_dir("roundtrip");
+        write_manifest(
+            &root,
+            "mouse-battery",
+            r##"{
+                "description": "Mouse battery",
+                "exec": "python \"${dir}\\mouse-battery.py\" --styled",
+                "interval": 60,
+                "output": "html",
+                "classes": { "green": { "color": "#7fdbb0" } }
+            }"##,
+        );
+
+        let entry = find("mouse-battery", &root).expect("scanned");
+        let dir = materialize(&entry, &root).unwrap();
+        let body = definition_body(&entry, "    ", &dir);
+        let text = crate::editor::append_module("{}", &entry.name, &body).unwrap();
+        let cfg = crate::config::parse(&text).expect("folder module definition parses");
+
+        let m = cfg.modules.get("mouse-battery").expect("defined");
+        let expected = root.join("modules").join("mouse-battery");
+        assert_eq!(
+            m.exec,
+            format!(
+                r#"python "{}\mouse-battery.py" --styled"#,
+                expected.display()
+            )
+        );
+        assert_eq!(m.interval, 60);
+        assert_eq!(m.output, "html");
+        assert!(m.classes.contains_key("green"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_missing_modules_folder_is_not_an_error() {
+        let root = temp_dir("empty");
+        assert_eq!(entries(&root).len(), 4, "just the built-ins");
         let _ = std::fs::remove_dir_all(&root);
     }
 
