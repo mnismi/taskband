@@ -16,6 +16,9 @@ mod window;
 
 fn main() -> windows::core::Result<()> {
     let path = config::config_path();
+    // First run with no config anywhere: create the per-user one so there is a
+    // real file to edit, watch, and drop modules next to.
+    config::ensure_user_config(&path);
     // A missing config falls back to the built-in default inside `load`; a config
     // that exists but fails to parse also falls back, so the app always starts.
     let cfg = config::load(&path).unwrap_or_else(|e| {

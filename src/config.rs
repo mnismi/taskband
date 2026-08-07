@@ -213,30 +213,136 @@ pub fn slots_for_monitor(
     }
 }
 
-/// Resolve the config path: an existing `config.json` next to the executable
-/// wins, then one in the current working directory. If neither exists the
-/// canonical location (next to the executable) is returned anyway, so the
-/// tray's "Edit config" creates it there and the watcher reloads it live.
+/// The per-user config home, `%USERPROFILE%\Taskband`. `None` only if the
+/// environment variable is missing, which should not happen on Windows.
+pub fn user_config_dir() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join("Taskband"))
+}
+
+/// Pick the config file from the three candidates in precedence order: beside
+/// the executable, then the working directory, then `user`. The first two are
+/// used only when they already exist, so `user` is both the fallback and the
+/// only location [`ensure_user_config`] ever creates.
+fn resolve_config_path(beside_exe: Option<&Path>, cwd: &Path, user: &Path) -> PathBuf {
+    if let Some(path) = beside_exe {
+        if path.exists() {
+            return path.to_path_buf();
+        }
+    }
+    if cwd.exists() {
+        return cwd.to_path_buf();
+    }
+    user.to_path_buf()
+}
+
+/// Resolve the config path. An existing `config.json` next to the executable
+/// wins, then one in the current working directory (so `cargo run` from the
+/// repo keeps using the repo's config); otherwise the canonical per-user
+/// location, whether or not it exists yet.
 pub fn config_path() -> PathBuf {
     let beside_exe = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("config.json")));
+    let cwd = PathBuf::from("config.json");
+    let user = match user_config_dir() {
+        Some(dir) => dir.join("config.json"),
+        None => {
+            eprintln!("Taskband: USERPROFILE is not set; using the executable's directory");
+            beside_exe.clone().unwrap_or_else(|| cwd.clone())
+        }
+    };
+    resolve_config_path(beside_exe.as_deref(), &cwd, &user)
+}
 
-    if let Some(candidate) = &beside_exe {
-        if candidate.exists() {
-            return candidate.clone();
+/// Write the built-in default to `path`, creating its directory, when the file
+/// is absent. An existing file is left untouched, which is what confines this
+/// to the canonical location: the other two candidates in [`config_path`] only
+/// ever resolve to a path that already exists.
+pub fn ensure_user_config(path: &Path) {
+    if path.exists() {
+        return;
+    }
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            eprintln!("Taskband: cannot create {}: {e}", dir.display());
+            return;
         }
     }
-    let cwd = PathBuf::from("config.json");
-    if cwd.exists() {
-        return cwd;
+    if let Err(e) = std::fs::write(path, DEFAULT_CONFIG) {
+        eprintln!("Taskband: cannot write {}: {e}", path.display());
     }
-    beside_exe.unwrap_or(cwd)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fresh empty temp directory, removed by the caller.
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "taskband-{tag}-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn resolve_prefers_exe_then_cwd_then_user() {
+        let root = temp_dir("resolve");
+        let exe = root.join("exe.json");
+        let cwd = root.join("cwd.json");
+        let user = root.join("user.json");
+
+        // nothing exists: the canonical user path is returned anyway
+        assert_eq!(resolve_config_path(Some(&exe), &cwd, &user), user);
+
+        // only cwd exists: cwd wins over the (absent) exe candidate
+        std::fs::write(&cwd, "{}").unwrap();
+        assert_eq!(resolve_config_path(Some(&exe), &cwd, &user), cwd);
+
+        // both exist: beside the exe wins
+        std::fs::write(&exe, "{}").unwrap();
+        assert_eq!(resolve_config_path(Some(&exe), &cwd, &user), exe);
+
+        // no exe candidate at all (current_exe failed): cwd still wins
+        assert_eq!(resolve_config_path(None, &cwd, &user), cwd);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn ensure_user_config_creates_once_and_never_overwrites() {
+        let root = temp_dir("ensure");
+        let path = root.join("Taskband").join("config.json");
+        assert!(!path.exists());
+
+        ensure_user_config(&path);
+        assert!(path.exists(), "creates the directory and the file");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), DEFAULT_CONFIG);
+
+        // a user's edits survive a second call
+        std::fs::write(&path, r#"{ "modules": [] }"#).unwrap();
+        ensure_user_config(&path);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            r#"{ "modules": [] }"#
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn user_config_dir_sits_under_the_profile() {
+        // USERPROFILE is always set on Windows; the test asserts the shape only.
+        let dir = user_config_dir().expect("USERPROFILE is set");
+        assert!(dir.ends_with("Taskband"));
+    }
 
     #[test]
     fn parses_modules_order_and_css() {
